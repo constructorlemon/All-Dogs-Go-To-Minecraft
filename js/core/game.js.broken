@@ -1,0 +1,113 @@
+(function () {
+  'use strict';
+  var AllDogs = (window.AllDogs = window.AllDogs || {});
+  var THREE = window.THREE;
+
+  var C = AllDogs.constants;
+  var WORLD_SIZE = C.WORLD_SIZE;
+  var WORLD_HEIGHT = C.WORLD_HEIGHT;
+  var REACH = C.REACH;
+  var PLAYER_HALF_WIDTH = C.PLAYER_HALF_WIDTH;
+  var DROP_PICKUP_RADIUS = 1.2;
+
+  var blocks = AllDogs.blocks;
+  var BLOCK = blocks.BLOCK;
+  var BLOCK_DEFS = blocks.BLOCK_DEFS;
+  var ITEMS = blocks.ITEMS;
+  var orderEntries = blocks.orderEntries;
+
+  var craftingApi = AllDogs.crafting;
+  var furnaceSmelts = {};
+  try { furnaceSmelts.dirt = [BLOCK.CLAY, 1]; } catch (e) {}
+
+  (function() { try { furnaceSmelts.dirt = [BLOCK.CLAY, 1]; } catch (e) {} })();
+  (function() { try { furnaceSmelts.dirt = [BLOCK.CLAY, 1]; } catch (e) {} })();
+
+  var Game = function (container) {
+    this.container = container;
+    this.started = false;
+    this.creative = false;
+      this.target = null;
+      this.targetEntity = null;
+      this.worldMeshes = [];
+      this.target = null;
+      this.chunkSize = C.CHUNK_SIZE;
+
+      this.scene = new THREE.Scene();
+      this.scene.background = new THREE.Color(0x8fc7ff);
+      this.scene.fog = new THREE.Fog(0x8fc7ff, 60, 150);
+
+      this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 250);
+
+      this.renderer = new THREE.WebGLRenderer({ antialias: true });
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      this.renderer.setSize(window.innerWidth, window.innerHeight);
+      container.appendChild(this.renderer.domElement);
+
+      var hemi = new THREE.HemisphereLight(0xffffff, 0x8a7f6a, 0.9);
+      var sun = new THREE.DirectionalLight(0xfff2dc, 1.1);
+      sun.position.set(60, 130, 40);
+      this.scene.add(hemi, sun);
+
+      this.world = new AllDogs.World();
+      this.inventory = new AllDogs.Inventory();
+      this.input = new AllDogs.Input(this.renderer.domElement);
+      this.player = new AllDogs.Player(this.camera);
+      this.raycaster = new AllDogs.BlockRaycaster(this.camera, REACH);
+
+      this.hud = new AllDogs.Hud();
+      this.hotbar = new AllDogs.Hotbar();
+      this.staminaBar = new AllDogs.StaminaBar();
+      this.panel = new AllDogs.InventoryPanel();
+      this.signEditor = new AllDogs.SignEditor();
+      this.debug = new AllDogs.DebugHud();
+      this.menuDebug = new AllDogs.MainDebug();
+      var self = this;
+      this.signEditor.onClose = function () { self.closeSignEditor(); };
+      this.panel.onMove = function (fromIdx, fromZone, toIdx, toZone, count) {
+        self.handleItemMove(fromIdx, fromZone, toIdx, toZone, count);
+      };
+      this.panel.onCraftOutput = function () { self.takeCraftOutput(); };
+      this.panel.onDistribute = function (sourceIdx, sourceZone, targets, mode) {
+        var ok = self.distributeStack(sourceIdx, sourceZone, targets, mode);
+        if (ok) self.refreshUI();
+      };
+      this.hotbar.onSelectIndex = function (idx) { self.selectSlot(idx); };
+      this.panel.onSelect = function (id) {
+        if (!self.creative && self.inventory.count(id) < 1) return;
+        self.selectedItem = id;
+        self.hud.flash('Selected ' + ITEMS[id].name);
+        self.refreshUI();
+      };
+
+      this.worldGroup = new THREE.Group();
+      this.scene.add(this.worldGroup);
+
+      this.highlight = new THREE.LineSegments(
+        new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
+        new THREE.LineBasicMaterial({ color: 0x111111 })
+      );
+      this.highlight.visible = false;
+      this.scene.add(this.highlight);
+
+      this.drops = new AllDogs.Drops();
+      this.scene.add(this.drops.group);
+      this.entityManager = new AllDogs.EntityManager(this.scene);
+
+      this.zones = new AllDogs.ZoneManager(this.world);
+      this.zones.register(new AllDogs.TestingZone());
+      var zone = this.zones.enter('testing');
+      this.worldMeshes = this.world.buildChunkMeshes(this.chunkSize, this.worldGroup);
+      this.player.spawn(zone.spawn.x, zone.spawn.y, zone.spawn.z);
+      this.spawnZoneEntities(zone);
+      this.hud.setZone(this.zones.name());
+
+      this.bindEvents();
+      this.hud.showOverlay('Click to start');
+    }
+    }
+    }
+    bindEvents() {
+      var canvas = this.renderer.domElement;
+      var self = this;
+      this.input.listen();
