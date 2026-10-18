@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mod Textures</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header id="mod-header">
+    <a href="index.html">Back to game</a>
+    <h1>Block Texture Editor</h1>
+  </header>
+
+  <div id="mod-editor">
+    <div id="stage"></div>
+
+    <aside id="mod-tools">
+      <div class="mod-tool-group">
+        <label class="mod-label" for="mod-color">Brush color</label>
+        <input type="color" id="mod-color" value="#8b5a2b" />
+      </div>
+
+      <div class="mod-tool-group">
+        <label class="mod-label" for="mod-size">Brush size <span id="mod-size-label">2</span></label>
+        <input type="range" id="mod-size" min="1" max="8" value="2" />
+      </div>
+
+      <div class="mod-tool-group">
+        <label class="mod-label" for="mod-grain">Grain density <span id="mod-grain-label">70%</span></label>
+        <input type="range" id="mod-grain" min="10" max="100" value="70" />
+      </div>
+
+      <div class="mod-tool-group">
+        <label class="mod-label" for="mod-blend">Blend mode</label>
+        <select id="mod-blend" class="mod-select">
+          <option value="normal">Normal</option>
+          <option value="multiply">Multiply</option>
+          <option value="lighten">Lighten</option>
+          <option value="darken">Darken</option>
+        </select>
+      </div>
+
+      <div class="mod-tool-group mod-tools-row" id="mod-tools-row">
+        <button class="mod-tool-btn active" data-tool="brush" title="Paint">Brush</button>
+        <button class="mod-tool-btn" data-tool="texture" title="Paint with grain">Texture</button>
+        <button class="mod-tool-btn" data-tool="eraser" title="Erase to transparent">Eraser</button>
+        <button class="mod-tool-btn" data-tool="fill" title="Fill a face region">Fill</button>
+        <button class="mod-tool-btn" data-tool="pick" title="Pick a color">Pick</button>
+        <button class="mod-tool-btn" data-tool="circle" title="Draw a circle">Circle</button>
+        <button class="mod-tool-btn" data-tool="square" title="Draw a square">Square</button>
+      </div>
+
+      <div class="mod-tool-group">
+        <label class="mod-label">Shape style</label>
+        <div class="mod-tools-row">
+          <button id="mod-shape-fill" class="mod-tool-btn active">Filled</button>
+          <button id="mod-shape-outline" class="mod-tool-btn">Outline</button>
+        </div>
+      </div>
+
+      <div class="mod-tool-group mod-tools-row">
+        <button id="mod-undo" class="mod-act-btn" disabled>Undo</button>
+        <button id="mod-redo" class="mod-act-btn" disabled>Redo</button>
+      </div>
+
+      <div class="mod-tool-group">
+        <button id="mod-rotate">Auto-rotate: on</button>
+      </div>
+
+      <div class="mod-tool-group">
+        <button id="mod-clear">Clear all</button>
+      </div>
+
+      <div class="mod-tool-group">
+        <label class="mod-label" for="mod-name">Block name</label>
+        <input type="text" id="mod-name" class="mod-text" value="block_texture" spellcheck="false" autocomplete="off" />
+        <div class="mod-note">Used as the in-game block name and the file name.</div>
+      </div>
+
+      <div class="mod-tool-group">
+        <label class="mod-label" for="mod-rot">Rotation</label>
+        <select id="mod-rot">
+          <option value="none">None</option>
+          <option value="rot">Any direction (like a log)</option>
+          <option value="rotY">Around the up axis only (like a furnace)</option>
+        </select>
+        <div class="mod-note">Exports as <code id="mod-export-name">block_texture.png</code>. <code>_rot</code> places facing any direction in any orientation. <code>_rotY</code> only rotates around the up axis, so a furnace cannot end up upside down.</div>
+      </div>
+
+      <div class="mod-tool-group">
+        <label class="mod-label" for="mod-upload">Edit an existing texture</label>
+        <input type="file" id="mod-upload" accept="image/*" />
+        <div class="mod-note">Loads a saved PNG back onto the canvas. Its file name sets the name and rotation toggle above, so you can edit and re-export it.</div>
+      </div>
+    </aside>
+
+    <div id="mod-preview-pane">
+      <canvas id="mod-flat"></canvas>
+      <div class="mod-flat-legend">
+        <span>Right</span><span>Left</span><span>Top</span>
+        <span>Bottom</span><span>Back</span><span>Forward</span>
+      </div>
+      <div id="mod-status">Opaque block (no transparency)</div>
+      <div class="mod-preview-hint">Drag on the flat map to paint precisely.</div>
+      <div class="mod-preview-hint">Eraser pixels are transparent &mdash; faces with any transparency make the block see-through in-game.</div>
+      <button id="mod-download">Download texture</button>
+      <div class="mod-preview-hint">To use in-game: save the PNG into mods/texture, then run: node tools/scanmods.js</div>
+    </div>
+  </div>
+
+  <script src="lib/three.min.js"></script>
+  <script src="js/mod/textureEditor.js"></script>
+</body>
+</html>

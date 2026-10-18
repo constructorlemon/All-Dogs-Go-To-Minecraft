@@ -1,0 +1,250 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>All Dogs Go To Minecraft</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="game"></div>
+
+  <div id="hud">
+    <div id="crosshair"></div>
+    <div id="zone-label">Zone: Loading...</div>
+    <div id="hint"></div>
+    <div id="stamina"><div class="stamina-fill"></div><div class="stamina-ticks"></div></div>
+  </div>
+
+  <div id="hotbar"></div>
+
+  <div id="inventory" hidden></div>
+
+  <div id="sign-editor" hidden>
+    <div class="sign-win">
+      <div class="sign-title">Sign Text</div>
+      <textarea id="sign-text" rows="4" maxlength="120" spellcheck="false"></textarea>
+      <div class="sign-actions">
+        <button class="sign-btn" id="sign-save">Save</button>
+      </div>
+      <div class="sign-hint">Enter to save &bull; Esc to cancel &bull; up to 4 lines</div>
+    </div>
+  </div>
+
+  <div id="overlay">
+    <h1>All Dogs Go To Minecraft</h1>
+    <p id="overlay-title">The Testing Zone</p>
+    <p id="overlay-text">Click to start</p>
+    <div class="overlay-buttons">
+      <button class="overlay-btn creative" id="overlay-creative">Creative</button>
+      <button class="overlay-btn" id="overlay-instructions">Instructions</button>
+    </div>
+  </div>
+
+  <script src="lib/three.min.js"></script>
+  <script src="js/core/constants.js"></script>
+  <script src="js/world/blocks.js"></script>
+  <script src="js/world/textures.js"></script>
+  <script src="js/world/worldgen.js"></script>
+  <script src="js/world/world.js"></script>
+  <script src="js/world/structures/structure.js"></script>
+  <script src="js/world/structures/house.js"></script>
+  <script src="js/world/drops.js"></script>
+  <script src="js/entity/entity.js"></script>
+  <script src="js/entity/sign.js"></script>
+  <script src="js/entity/chest.js"></script>
+  <script src="js/entity/entityManager.js"></script>
+  <script src="js/movement/input.js"></script>
+  <script src="js/movement/player.js"></script>
+  <script src="js/crafting/inventory.js"></script>
+  <script src="js/crafting/recipes.js"></script>
+  <script src="js/crafting/crafting.js"></script>
+  <script src="js/zones/zone.js"></script>
+  <script src="js/zones/zoneManager.js"></script>
+  <script src="js/zones/testing.js"></script>
+  <script src="js/core/raycast.js"></script>
+  <script src="js/ui/icons.js"></script>
+  <script src="js/ui/hud.js"></script>
+  <script src="js/ui/hotbar.js"></script>
+  <script src="js/ui/stamina.js"></script>
+  <script src="js/ui/signEditor.js"></script>
+  <script src="js/ui/inventoryPanel.js"></script>
+  <script src="js/ui/debug.js"></script>
+  <script src="js/ui/menuDebug.js"></script>
+  <script src="js/mods/manifest.js"></script>
+  <script src="js/mods/modLoader.js"></script>
+  <script src="js/core/game.js"></script>
+  <script src="js/main.js"></script>
+
+  <script>
+  (function () {
+    var errors = [];
+    window.addEventListener('error', function (e) { errors.push(String(e.message)); });
+    var results = [];
+
+    function report() {
+      var el = document.createElement('div');
+      el.id = 'smoke-result';
+      el.setAttribute('data-smoke', results.join(' | '));
+      el.setAttribute('data-errors', errors.join(' ;; '));
+      document.body.appendChild(el);
+    }
+
+    var tries = 0;
+    function run() {
+      tries++;
+      if (!window.game) {
+        if (tries < 400) return setTimeout(run, 25);
+        results.push('NOGAME');
+        return report();
+      }
+      var g = window.game;
+      try {
+        results.push('renderer=' + (g.renderer ? 1 : 0));
+        results.push('boot=1');
+        results.push('used=' + g.inventory.usedSlots() + '/' + g.inventory.capacity);
+        results.push('slots=' + JSON.stringify(g.inventory.slots.map(function (s) { return s ? s.id + ':' + s.qty : null; })));
+
+        var n = 0, furnId = null;
+        for (var id in AllDogs.blocks.BLOCK_DEFS) {
+          var d = AllDogs.blocks.BLOCK_DEFS[id];
+          if (d && d.schema && d.texture && /furnace/i.test(d.texture)) {
+            n++;
+            if (furnId === null) furnId = Number(id);
+          }
+        }
+        results.push('furnSchema=' + n);
+        results.push('furnId=' + furnId);
+
+        g.openFurnace({ x: 1, y: 2, z: 3 });
+        results.push('open=' + (g.inventoryOpen ? 1 : 0));
+        results.push('mode=' + (g.panelOpts().mode || 'none'));
+        results.push('hidden=' + (g.panel.el.hidden ? 1 : 0));
+
+        var f = g.furnaces['1,2,3'];
+        f.slots[0] = { id: 'dirt', qty: 1 };
+        g.updateFurnaces(11);
+        results.push('out=' + (f.out ? f.out.id + ':' + f.out.qty : 'null'));
+        results.push('in=' + (f.slots[0] ? f.slots[0].id : 'null'));
+
+        g.inventoryOpen = false;
+        g.panel.close();
+        g.openFurnaceKey = null;
+
+        var px = Math.floor(g.player.pos.x);
+        var pz = Math.floor(g.player.pos.z);
+        var y = Math.floor(g.player.pos.y) - 1;
+        g.world.set(px, y, pz - 2, furnId);
+        var hit = { x: px, y: y, z: pz - 2, blockId: furnId, fx: 0, fy: 1, fz: 0, onX: 0.5, onY: 1, onZ: 0.5 };
+        g.target = hit;
+        g.tryPlace();
+        results.push('clickOpen=' + (g.inventoryOpen ? 1 : 0));
+        results.push('clickMode=' + (g.panelOpts().mode || 'none'));
+
+        g.inventoryOpen = false;
+        g.panel.close();
+        g.openFurnaceKey = null;
+        g.player.state = 'crouch';
+        g.target = hit;
+        g.tryBreak();
+        results.push('crouchOpen=' + (g.inventoryOpen ? 1 : 0));
+        results.push('blockStill=' + (g.world.get(px, y, pz - 2) === furnId ? 1 : 0));
+        g.player.state = 'stand';
+
+        var WG = AllDogs.worldgen;
+        results.push('wg=' + (WG ? 1 : 0));
+        results.push('h00=' + WG.heightAt(0, 0));
+        results.push('surf=' + WG.blockAt(0, WG.heightAt(0, 0), 0));
+        results.push('air=' + WG.blockAt(0, WG.heightAt(0, 0) + 40, 0));
+        results.push('rock=' + WG.blockAt(3, 0, 3));
+        results.push('far=' + WG.heightAt(12000, -8431));
+
+        g.world.clear();
+        g.world.updateChunks(0, 0, 2, 16, g.worldGroup, 1000);
+        results.push('chunks=' + g.world.chunkMeshes.size);
+        results.push('meshes=' + g.world.collectMeshes().length);
+        results.push('gen=' + g.world.get(0, WG.heightAt(0, 0), 0));
+        g.world.set(0, WG.heightAt(0, 0), 0, 0);
+        results.push('broke=' + g.world.get(0, WG.heightAt(0, 0), 0));
+        g.world.rebuildChunk(0, 0, 16, g.worldGroup);
+        results.push('afterRebuild=' + g.world.get(0, WG.heightAt(0, 0), 0));
+        g.world.set(0, WG.heightAt(0, 0), 0, 0);
+        g.world.set(0, WG.heightAt(0, 0), 0, AllDogs.blocks.BLOCK.GRASS);
+        results.push('restored=' + g.world.get(0, WG.heightAt(0, 0), 0));
+
+        var ST = AllDogs.structures;
+        results.push('st=' + (ST ? 1 : 0));
+        results.push('hdef=' + (ST && ST.get('house') ? 1 : 0));
+        g.world.clear();
+        var found = [];
+        for (var cxx = -4; cxx <= 4; cxx++) {
+          for (var czz = -4; czz <= 4; czz++) {
+            var ps = ST.placements(cxx, czz);
+            for (var q = 0; q < ps.length; q++) {
+              var pp = ps[q];
+              if (pp.def.name !== 'house') continue;
+              var dup = false;
+              for (var f2 = 0; f2 < found.length; f2++) {
+                if (found[f2].x === pp.x && found[f2].z === pp.z) dup = true;
+              }
+              if (!dup) found.push(pp);
+            }
+          }
+        }
+        results.push('houses=' + found.length);
+        if (found.length) {
+          var h = found[0];
+          results.push('hpos=' + h.x + ',' + h.base + ',' + h.z);
+          results.push('hsize=' + h.size);
+          results.push('hturns=' + h.turns);
+          for (var ecx = Math.floor((h.x - 1) / 16); ecx <= Math.floor((h.x + h.size) / 16); ecx++) {
+            for (var ecz = Math.floor((h.z - 1) / 16); ecz <= Math.floor((h.z + h.size) / 16); ecz++) {
+              g.world.ensureChunk(ecx, ecz);
+            }
+          }
+          var ents = ST.entitiesFor(Math.floor(h.x / 16), Math.floor(h.z / 16));
+          results.push('hents=' + ents.length);
+          results.push('htypes=' + ents.map(function (e) { return e.type; }).join('+'));
+          var sign = null, chest = 0;
+          for (var z2 = 0; z2 < ents.length; z2++) {
+            if (ents[z2].type === 'sign') sign = ents[z2];
+            if (ents[z2].type === 'chest') chest++;
+          }
+          results.push('hsign=' + (sign && sign.text ? sign.text[0] : 'none'));
+          results.push('hchest=' + chest);
+          var fcount = 0;
+          for (var dx = -1; dx <= h.size; dx++) {
+            for (var dz = -1; dz <= h.size; dz++) {
+              for (var dy = 0; dy < h.variant.height; dy++) {
+                var bid = g.world.get(h.x + dx, h.base + dy, h.z + dz);
+                var bd = AllDogs.blocks.BLOCK_DEFS[bid];
+                if (bd && bd.texture && /furnace/i.test(bd.texture)) fcount++;
+              }
+            }
+          }
+          results.push('hfurn=' + fcount);
+
+          g.player.pos.set(h.x + 0.5, h.base + 2, h.z + 0.5);
+          for (var uf = 0; uf < 40; uf++) {
+            g.world.updateChunks(g.player.pos.x, g.player.pos.z, 2, 16, g.worldGroup, 1000);
+          }
+          g.syncStructureChunks();
+          var sc = 0, ss = 0;
+          for (var ei = 0; ei < g.entityManager.entities.length; ei++) {
+            var et = g.entityManager.entities[ei].type;
+            if (et === 'chest') sc++;
+            if (et === 'sign') ss++;
+          }
+          results.push('emChest=' + sc);
+          results.push('emSign=' + ss);
+        }
+      } catch (err) {
+        results.push('EXC:' + String(e && e.message ? e.message : err));
+      }
+      report();
+    }
+    setTimeout(run, 50);
+  })();
+  </script>
+</body>
+</html>
