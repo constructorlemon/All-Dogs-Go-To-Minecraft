@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>All Dogs Go To Minecraft</title>
-  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="../css/style.css" />
 </head>
 <body>
   <div id="game"></div>
@@ -41,40 +41,40 @@
     </div>
   </div>
 
-  <script src="lib/three.min.js"></script>
-  <script src="js/core/constants.js"></script>
-  <script src="js/world/blocks.js"></script>
-  <script src="js/world/textures.js"></script>
-  <script src="js/world/worldgen.js"></script>
-  <script src="js/world/world.js"></script>
-  <script src="js/world/structures/structure.js"></script>
-  <script src="js/world/structures/house.js"></script>
-  <script src="js/world/drops.js"></script>
-  <script src="js/entity/entity.js"></script>
-  <script src="js/entity/sign.js"></script>
-  <script src="js/entity/chest.js"></script>
-  <script src="js/entity/entityManager.js"></script>
-  <script src="js/movement/input.js"></script>
-  <script src="js/movement/player.js"></script>
-  <script src="js/crafting/inventory.js"></script>
-  <script src="js/crafting/recipes.js"></script>
-  <script src="js/crafting/crafting.js"></script>
-  <script src="js/zones/zone.js"></script>
-  <script src="js/zones/zoneManager.js"></script>
-  <script src="js/zones/testing.js"></script>
-  <script src="js/core/raycast.js"></script>
-  <script src="js/ui/icons.js"></script>
-  <script src="js/ui/hud.js"></script>
-  <script src="js/ui/hotbar.js"></script>
-  <script src="js/ui/stamina.js"></script>
-  <script src="js/ui/signEditor.js"></script>
-  <script src="js/ui/inventoryPanel.js"></script>
-  <script src="js/ui/debug.js"></script>
-  <script src="js/ui/menuDebug.js"></script>
-  <script src="js/mods/manifest.js"></script>
-  <script src="js/mods/modLoader.js"></script>
-  <script src="js/core/game.js"></script>
-  <script src="js/main.js"></script>
+  <script src="../lib/three.min.js"></script>
+  <script src="../js/core/constants.js"></script>
+  <script src="../js/world/blocks.js"></script>
+  <script src="../js/world/textures.js"></script>
+  <script src="../js/world/worldgen.js"></script>
+  <script src="../js/world/world.js"></script>
+  <script src="../js/world/structures/structure.js"></script>
+  <script src="../js/world/structures/house.js"></script>
+  <script src="../js/world/drops.js"></script>
+  <script src="../js/entity/entity.js"></script>
+  <script src="../js/entity/sign.js"></script>
+  <script src="../js/entity/chest.js"></script>
+  <script src="../js/entity/entityManager.js"></script>
+  <script src="../js/movement/input.js"></script>
+  <script src="../js/movement/player.js"></script>
+  <script src="../js/crafting/inventory.js"></script>
+  <script src="../js/crafting/recipes.js"></script>
+  <script src="../js/crafting/crafting.js"></script>
+  <script src="../js/zones/zone.js"></script>
+  <script src="../js/zones/zoneManager.js"></script>
+  <script src="../js/zones/testing.js"></script>
+  <script src="../js/core/raycast.js"></script>
+  <script src="../js/ui/icons.js"></script>
+  <script src="../js/ui/hud.js"></script>
+  <script src="../js/ui/hotbar.js"></script>
+  <script src="../js/ui/stamina.js"></script>
+  <script src="../js/ui/signEditor.js"></script>
+  <script src="../js/ui/inventoryPanel.js"></script>
+  <script src="../js/ui/debug.js"></script>
+  <script src="../js/ui/menuDebug.js"></script>
+  <script src="../js/mods/manifest.js"></script>
+  <script src="../js/mods/modLoader.js"></script>
+  <script src="../js/core/game.js"></script>
+  <script src="../js/main.js"></script>
 
   <script>
   (function () {
@@ -160,7 +160,7 @@
         results.push('far=' + WG.heightAt(12000, -8431));
 
         g.world.clear();
-        g.world.updateChunks(0, 0, 2, 16, g.worldGroup, 1000);
+        g.world.updateChunks(0, 0, 2, 16, g.worldGroup, 1000, 10000);
         results.push('chunks=' + g.world.chunkMeshes.size);
         results.push('meshes=' + g.world.collectMeshes().length);
         results.push('gen=' + g.world.get(0, WG.heightAt(0, 0), 0));
@@ -192,6 +192,28 @@
           }
         }
         results.push('houses=' + found.length);
+        var furnOk = 0, furnBad = 0;
+        for (var fh = 0; fh < found.length; fh++) {
+          var hh = found[fh];
+          for (var fcxx = Math.floor((hh.x - 1) / 16); fcxx <= Math.floor((hh.x + hh.size) / 16); fcxx++) {
+            for (var fczz = Math.floor((hh.z - 1) / 16); fczz <= Math.floor((hh.z + hh.size) / 16); fczz++) {
+              g.world.ensureChunk(fcxx, fczz);
+            }
+          }
+          for (var fdx = -1; fdx <= hh.size; fdx++) {
+            for (var fdz = -1; fdz <= hh.size; fdz++) {
+              for (var fdy = 0; fdy < hh.variant.height; fdy++) {
+                var fbid = g.world.get(hh.x + fdx, hh.base + fdy, hh.z + fdz);
+                var fbd = AllDogs.blocks.BLOCK_DEFS[fbid];
+                if (fbd && fbd.texture && /furnace/i.test(fbd.texture)) {
+                  if ((fbd.yaw || 0) === (hh.turns % 4)) furnOk++; else furnBad++;
+                }
+              }
+            }
+          }
+        }
+        results.push('furnAll=' + furnOk + '/' + (furnOk + furnBad));
+        g.world.clear();
         if (found.length) {
           var h = found[0];
           results.push('hpos=' + h.x + ',' + h.base + ',' + h.z);
@@ -213,20 +235,25 @@
           results.push('hsign=' + (sign && sign.text ? sign.text[0] : 'none'));
           results.push('hchest=' + chest);
           var fcount = 0;
+          var fyaw = -1;
           for (var dx = -1; dx <= h.size; dx++) {
             for (var dz = -1; dz <= h.size; dz++) {
               for (var dy = 0; dy < h.variant.height; dy++) {
                 var bid = g.world.get(h.x + dx, h.base + dy, h.z + dz);
                 var bd = AllDogs.blocks.BLOCK_DEFS[bid];
-                if (bd && bd.texture && /furnace/i.test(bd.texture)) fcount++;
+                if (bd && bd.texture && /furnace/i.test(bd.texture)) {
+                  fcount++;
+                  fyaw = (bd.yaw || 0);
+                }
               }
             }
           }
           results.push('hfurn=' + fcount);
+          results.push('fyaw=' + fyaw + ',expect=' + (h.turns % 4));
 
           g.player.pos.set(h.x + 0.5, h.base + 2, h.z + 0.5);
           for (var uf = 0; uf < 40; uf++) {
-            g.world.updateChunks(g.player.pos.x, g.player.pos.z, 2, 16, g.worldGroup, 1000);
+            g.world.updateChunks(g.player.pos.x, g.player.pos.z, 2, 16, g.worldGroup, 1000, 10000);
           }
           g.syncStructureChunks();
           var sc = 0, ss = 0;

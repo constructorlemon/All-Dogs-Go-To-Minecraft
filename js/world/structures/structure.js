@@ -137,7 +137,13 @@
     return { x: x, z: z };
   }
 
+  var placementCache = new Map();
+  var PLACEMENT_CACHE_MAX = 512;
+
   function placements(cx, cz) {
+    var ckey = cx + ',' + cz;
+    var cached = placementCache.get(ckey);
+    if (cached) return cached;
     var out = [];
     var x0 = cx * CHUNK;
     var z0 = cz * CHUNK;
@@ -160,6 +166,8 @@
         }
       }
     }
+    if (placementCache.size >= PLACEMENT_CACHE_MAX) placementCache.clear();
+    placementCache.set(ckey, out);
     return out;
   }
 
@@ -167,10 +175,7 @@
     var d = BLOCK_DEFS[id];
     if (!d || !d.directional) return id;
     var base = d.yawOf != null ? d.yawOf : id;
-    var bdef = BLOCK_DEFS[base] || d;
-    var t = turns;
-    if (bdef && bdef.texture === 'Furnace') t = (turns + 1) % 4;
-    var yaw = (((t + (d.yaw || 0)) % 4) + 4) % 4;
+    var yaw = (((turns + (d.yaw || 0)) % 4) + 4) % 4;
     var vid = blocks.yawVariantId(base, yaw);
     return vid || id;
   }

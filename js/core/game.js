@@ -117,11 +117,13 @@ this.started = false;
       var zone = this.zones.enter('testing');
       this.renderDistance = (AllDogs.constants.RENDER_DISTANCE != null)
         ? AllDogs.constants.RENDER_DISTANCE : 5;
-      this.chunksPerFrame = 2;
+      this.chunksPerFrame = 1;
+      this.chunkBuildBudgetMs = 6;
       this.player.spawn(zone.spawn.x, zone.spawn.y, zone.spawn.z);
       this.world.updateChunks(
         this.player.pos.x, this.player.pos.z,
-        this.renderDistance, this.chunkSize, this.worldGroup, 9
+        this.renderDistance, this.chunkSize, this.worldGroup,
+        2, 24
       );
       this.worldMeshes = this.world.collectMeshes();
       this.syncStructureChunks();
@@ -772,7 +774,7 @@ this.started = false;
         this.player.pos.x,
         this.player.pos.z,
         this.renderDistance, this.chunkSize, this.worldGroup,
-        this.chunksPerFrame
+        this.chunksPerFrame, this.chunkBuildBudgetMs
       );
       if (changed) {
         this.worldMeshes = this.world.collectMeshes();

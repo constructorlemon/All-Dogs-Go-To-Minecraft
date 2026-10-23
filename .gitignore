@@ -1,0 +1,11 @@
+# SSH keys for this project (never commit)
+.ssh/
+
+# OS / editor junk
+Thumbs.db
+Desktop.ini
+*.swp
+.DS_Store
+
+# Backups
+backups/

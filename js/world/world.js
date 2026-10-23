@@ -91,9 +91,11 @@
       this.chunkData = new Map();
       this.chunkMeshes = new Map();
       this.colliders = [];
+      this.activeJob = null;
     }
 
     clear() {
+      this.activeJob = null;
       var keys = Array.from(this.chunkMeshes.keys());
       for (var i = 0; i < keys.length; i++) this.disposeChunk(keys[i]);
       this.chunkMeshes.clear();
@@ -236,16 +238,47 @@
       var meshes = [];
       for (var ckey of this.chunkData.keys()) {
         var parts = ckey.split(',');
-        var built = this.buildChunkMeshesAt(Number(parts[0]), Number(parts[1]), chunkSize, group);
+        var built = this.buildChunk(Number(parts[0]), Number(parts[1]), chunkSize, group);
         for (var j = 0; j < built.length; j++) meshes.push(built[j]);
       }
       return meshes;
     }
 
     buildChunk(cx, cz, chunkSize, group) {
-      var built = this.buildChunkMeshesAt(cx, cz, chunkSize, group);
-      this.chunkMeshes.set(cx + ',' + cz, { cx: cx, cz: cz, meshes: built });
-      return built;
+      var job = this.beginChunk(cx, cz, chunkSize, group);
+      var guard = 0;
+      while (job.phase !== 'done' && guard < 1000000) { this.stepChunk(job, Infinity); guard++; }
+      return job.meshes;
+    }
+
+    beginChunk(cx, cz, chunkSize, group) {
+      return {
+        cx: cx,
+        cz: cz,
+        chunkSize: chunkSize,
+        group: group,
+        cx0: cx * chunkSize,
+        cz0: cz * chunkSize,
+        phase: 'data',
+        meshes: [],
+        data: null,
+        col: 0,
+        treeI: 0,
+        faceGrids: null,
+        keyIds: null,
+        idToKey: null,
+        flat: null,
+        greedyF: 0,
+        greedyPlaneList: null,
+        greedyPi: 0,
+        greedyGrid: null,
+        greedyV: 0,
+        greedyHandled: null,
+        quadsByKey: null,
+        assembleKeys: null,
+        assembleI: 0,
+        quads2: null
+      };
     }
 
     disposeChunk(ckey) {
@@ -257,6 +290,7 @@
         if (mesh.geometry) mesh.geometry.dispose();
       }
       this.chunkMeshes.delete(ckey);
+      if (!this.editsByChunk.has(ckey)) this.chunkData.delete(ckey);
     }
 
     collectMeshes() {
@@ -272,41 +306,80 @@
       this.buildChunk(cx, cz, chunkSize, group);
     }
 
-    updateChunks(px, pz, radius, chunkSize, group, maxPerFrame) {
+    updateChunks(px, pz, radius, chunkSize, group, maxPerFrame, budgetMs) {
       var ccx = Math.floor(px / chunkSize);
       var ccz = Math.floor(pz / chunkSize);
       var changed = false;
+      var now = function () { return (typeof performance !== 'undefined' ? performance.now() : Date.now()); };
+      var start = now();
+      var budget = budgetMs || 6;
 
+      var keep = radius + 1;
       var remove = [];
       for (var entry of this.chunkMeshes.values()) {
-        if (Math.abs(entry.cx - ccx) > radius || Math.abs(entry.cz - ccz) > radius) {
-          remove.push(entry.cx + ',' + entry.cz);
-        }
+        var adx = Math.abs(entry.cx - ccx);
+        var adz = Math.abs(entry.cz - ccz);
+        if (adx > keep || adz > keep) remove.push(entry.cx + ',' + entry.cz);
       }
       for (var i = 0; i < remove.length; i++) {
         this.disposeChunk(remove[i]);
         changed = true;
+        if (now() - start > budget) break;
       }
 
-      var candidates = [];
+      if (this.activeJob && (Math.abs(this.activeJob.cx - ccx) > keep || Math.abs(this.activeJob.cz - ccz) > keep)) {
+        this.activeJob = null;
+      }
+
+      if (!this.activeJob) {
+        var candidates = [];
+        for (var dx = -radius; dx <= radius; dx++) {
+          for (var dz = -radius; dz <= radius; dz++) {
+            var cx = ccx + dx;
+            var cz = ccz + dz;
+            if (this.chunkMeshes.has(cx + ',' + cz)) continue;
+            candidates.push([dx * dx + dz * dz, cx, cz]);
+          }
+        }
+        if (!candidates.length) return changed;
+        candidates.sort(function (a, b) { return a[0] - b[0]; });
+        this.activeJob = this.beginChunk(candidates[0][1], candidates[0][2], chunkSize, group);
+      }
+
+      var budgetCount = maxPerFrame || 4;
+      var built = 0;
+      while (this.activeJob) {
+        this.stepChunk(this.activeJob, start + budget);
+        if (this.activeJob.phase === 'done') {
+          var job = this.activeJob;
+          this.chunkMeshes.set(job.cx + ',' + job.cz, { cx: job.cx, cz: job.cz, meshes: job.meshes });
+          this.activeJob = null;
+          changed = true;
+          built++;
+          if (built >= budgetCount || now() - start > budget) break;
+          this.activeJob = this.nextCandidate(ccx, ccz, radius, chunkSize, group);
+          if (!this.activeJob) break;
+        } else if (now() - start > budget) {
+          break;
+        }
+      }
+      return changed;
+    }
+
+    nextCandidate(ccx, ccz, radius, chunkSize, group) {
+      var best = null;
+      var bestD = Infinity;
       for (var dx = -radius; dx <= radius; dx++) {
         for (var dz = -radius; dz <= radius; dz++) {
           var cx = ccx + dx;
           var cz = ccz + dz;
           if (this.chunkMeshes.has(cx + ',' + cz)) continue;
-          candidates.push([dx * dx + dz * dz, cx, cz]);
+          var d = dx * dx + dz * dz;
+          if (d < bestD) { bestD = d; best = [cx, cz]; }
         }
       }
-      if (candidates.length) {
-        candidates.sort(function (a, b) { return a[0] - b[0]; });
-        var budget = maxPerFrame || 4;
-        var n = Math.min(budget, candidates.length);
-        for (var c = 0; c < n; c++) {
-          this.buildChunk(candidates[c][1], candidates[c][2], chunkSize, group);
-          changed = true;
-        }
-      }
-      return changed;
+      if (!best) return null;
+      return this.beginChunk(best[0], best[1], chunkSize, group);
     }
 
     putLocal(data, cx0, cz0, x, y, z, id) {
@@ -341,77 +414,122 @@
       var ckey = cx + ',' + cz;
       var cached = this.chunkData.get(ckey);
       if (cached) return cached;
-      var H = WORLD_HEIGHT;
-      var data = new Int16Array(CHUNK_SIZE * CHUNK_SIZE * H);
-      var cx0 = cx * CHUNK_SIZE;
-      var cz0 = cz * CHUNK_SIZE;
-
-      for (var lx = 0; lx < CHUNK_SIZE; lx++) {
-        var x = cx0 + lx;
-        for (var lz = 0; lz < CHUNK_SIZE; lz++) {
-          var z = cz0 + lz;
-          var h = AllDogs.worldgen.heightAt(x, z);
-          var sand = AllDogs.worldgen.isSandPatch(x, z);
-          var col = (lx * CHUNK_SIZE + lz) * H;
-          for (var y = 0; y <= h; y++) {
-            var b = BLOCK.STONE;
-            if (y === 0) b = BLOCK.BEDROCK;
-            else if (y === h) b = sand ? BLOCK.SAND : BLOCK.GRASS;
-            else if (y > h - 3) b = BLOCK.DIRT;
-            data[col + y] = b;
-          }
-        }
-      }
-
-      for (var gx = cx0 - 2; gx < cx0 + CHUNK_SIZE + 2; gx++) {
-        for (var gz = cz0 - 2; gz < cz0 + CHUNK_SIZE + 2; gz++) {
-          if (AllDogs.worldgen.hasTree(gx, gz)) this.writeTree(data, cx0, cz0, gx, gz);
-        }
-      }
-
-      if (AllDogs.structures) AllDogs.structures.stamp(this, data, cx, cz);
-
-      var eMap = this.editsByChunk.get(ckey);
-      if (eMap) {
-        for (var entry of eMap) {
-          var parts = entry[0].split(',');
-          var elx = Number(parts[0]) - cx0;
-          var elz = Number(parts[2]) - cz0;
-          if (elx < 0 || elz < 0 || elx >= CHUNK_SIZE || elz >= CHUNK_SIZE) continue;
-          data[(elx * CHUNK_SIZE + elz) * H + Number(parts[1])] = entry[1];
-        }
-      }
-
-      this.chunkData.set(ckey, data);
-      return data;
+      var job = this.beginChunk(cx, cz, CHUNK_SIZE, null);
+      var guard = 0;
+      while (job.phase !== 'done' && guard < 1000000) { this.stepChunk(job, Infinity); guard++; }
+      return this.chunkData.get(ckey);
     }
 
-    buildChunkMeshesAt(cx, cz, chunkSize, group) {
-      var cx0 = cx * chunkSize;
-      var cz0 = cz * chunkSize;
-
-      for (var f = 0; f < FACES.length; f++) {
-        FACES[f].uSize = axisSize(FACES[f].uIdx, chunkSize);
-        FACES[f].vSize = axisSize(FACES[f].vIdx, chunkSize);
+    stepChunk(job, deadline) {
+      var now = function () { return (typeof performance !== 'undefined' ? performance.now() : Date.now()); };
+      while (job.phase !== 'done') {
+        this.stepChunkPhase(job);
+        if (now() > deadline) return;
       }
+    }
 
-      var keyIds = new Map();
-      var idToKey = [];
-      function keyId(key) {
-        var id = keyIds.get(key);
-        if (id === undefined) {
-          id = idToKey.length + 1;
-          keyIds.set(key, id);
-          idToKey.push(key);
+    stepChunkPhase(job) {
+      if (job.phase === 'data') return this.stepDataPhase(job);
+      if (job.phase === 'mesh') return this.stepMeshPhase(job);
+      if (job.phase === 'greedy') return this.stepGreedyPhase(job);
+      if (job.phase === 'assemble') return this.stepAssemblePhase(job);
+      job.phase = 'done';
+    }
+
+    stepDataPhase(job) {
+      var cx = job.cx;
+      var cz = job.cz;
+      var cx0 = job.cx0 = cx * CHUNK_SIZE;
+      var cz0 = job.cz0 = cz * CHUNK_SIZE;
+      var H = WORLD_HEIGHT;
+      if (!job.data) {
+        job.data = new Int16Array(CHUNK_SIZE * CHUNK_SIZE * H);
+        job.col = 0;
+        job.sub = 'terrain';
+        job.treeGx = cx0 - 2;
+        job.treeGz = cz0 - 2;
+        job.treeEndX = cx0 + CHUNK_SIZE + 2;
+        job.treeEndZ = cz0 + CHUNK_SIZE + 2;
+      }
+      var data = job.data;
+
+      if (job.sub === 'terrain') {
+        var batch = 0;
+        while (job.col < CHUNK_SIZE) {
+          var lx = job.col;
+          var x = cx0 + lx;
+          for (var lz = 0; lz < CHUNK_SIZE; lz++) {
+            var z = cz0 + lz;
+            var h = AllDogs.worldgen.heightAt(x, z);
+            var sand = AllDogs.worldgen.isSandPatch(x, z);
+            var col = (lx * CHUNK_SIZE + lz) * H;
+            for (var y = 0; y <= h; y++) {
+              var b = BLOCK.STONE;
+              if (y === 0) b = BLOCK.BEDROCK;
+              else if (y === h) b = sand ? BLOCK.SAND : BLOCK.GRASS;
+              else if (y > h - 3) b = BLOCK.DIRT;
+              data[col + y] = b;
+            }
+          }
+          job.col++;
+          if (++batch >= 4) return;
         }
-        return id;
+        job.sub = 'trees';
+        job.gx = job.treeGx;
+        job.gz = job.treeGz;
       }
 
-      var faceGrids = [];
-      for (var f2 = 0; f2 < FACES.length; f2++) faceGrids.push(new Map());
+      if (job.sub === 'trees') {
+        var tbatch = 0;
+        while (job.gx < job.treeEndX) {
+          if (AllDogs.worldgen.hasTree(job.gx, job.gz)) this.writeTree(data, cx0, cz0, job.gx, job.gz);
+          job.gz++;
+          if (job.gz >= job.treeEndZ) { job.gz = job.treeGz; job.gx++; }
+          if (++tbatch >= 40) return;
+        }
+        job.sub = 'stamp';
+      }
 
-      var data = this.ensureChunk(cx, cz);
-      for (var lx = 0; lx < chunkSize; lx++) {
+      if (job.sub === 'stamp') {
+        if (AllDogs.structures) AllDogs.structures.stamp(this, data, cx, cz);
+        job.sub = 'edits';
+      }
+
+      if (job.sub === 'edits') {
+        var eMap = this.editsByChunk.get(cx + ',' + cz);
+        if (eMap) {
+          for (var entry of eMap) {
+            var parts = entry[0].split(',');
+            var elx = Number(parts[0]) - cx0;
+            var elz = Number(parts[2]) - cz0;
+            if (elx < 0 || elz < 0 || elx >= CHUNK_SIZE || elz >= CHUNK_SIZE) continue;
+            data[(elx * CHUNK_SIZE + elz) * H + Number(parts[1])] = entry[1];
+          }
+        }
+        this.chunkData.set(cx + ',' + cz, data);
+        job.phase = 'mesh';
+        job.faceGrids = [];
+        for (var f2 = 0; f2 < FACES.length; f2++) job.faceGrids.push(new Map());
+        job.keyIds = new Map();
+        job.idToKey = [];
+        for (var f3 = 0; f3 < FACES.length; f3++) {
+          FACES[f3].uSize = axisSize(FACES[f3].uIdx, job.chunkSize);
+          FACES[f3].vSize = axisSize(FACES[f3].vIdx, job.chunkSize);
+        }
+        job.lx = 0;
+      }
+    }
+
+    stepMeshPhase(job) {
+      var chunkSize = job.chunkSize;
+      var cx0 = job.cx0;
+      var cz0 = job.cz0;
+      var data = job.data;
+      var faceGrids = job.faceGrids;
+      var self = this;
+      var batch = 0;
+      while (job.lx < chunkSize) {
+        var lx = job.lx;
         var x = cx0 + lx;
         for (var lz = 0; lz < chunkSize; lz++) {
           var z = cz0 + lz;
@@ -426,91 +544,166 @@
 
             for (var f3 = 0; f3 < FACES.length; f3++) {
               var face = FACES[f3];
-              if (!isTransparent && !this.isFaceExposed(
-                x + face.d[0], y + face.d[1], z + face.d[2]
-              )) continue;
-
-          var gridU = face.uIdx === 1 ? y : (face.uIdx === 0 ? x - cx0 : z - cz0);
-          var gridV = face.vIdx === 1 ? y : (face.vIdx === 0 ? x - cx0 : z - cz0);
-          var plane = face.planeIdx === 0 ? x : face.planeIdx === 1 ? y : z;
-          if (face.d[face.planeIdx] > 0) plane += 1;
-          if (isTransparent && this.get(
-            x + face.d[0], y + face.d[1], z + face.d[2]
-          ) !== BLOCK.AIR) {
-            if (face.d[face.planeIdx] > 0) plane -= FACE_EPS;
-            else plane += FACE_EPS;
-          }
-
-          var grids = faceGrids[f3];
-          var grid = grids.get(plane);
-          if (!grid) {
-            grid = makeGrid(face.uSize, face.vSize);
-            grids.set(plane, grid);
-          }
-          grid.data[gridV * grid.u + gridU] = keyId(faceKey(tex, f3, def.axis || 'y', def.yaw));
-            }
-          }
-        }
-      }
-
-      var quadsByKey = new Map();
-      for (var f4 = 0; f4 < FACES.length; f4++) {
-        var fFace = FACES[f4];
-        for (var planeEntry of faceGrids[f4]) {
-          var grid2 = planeEntry[1];
-          var handled = new Uint8Array(grid2.u * grid2.v);
-          for (var v = 0; v < grid2.v; v++) {
-            for (var u = 0; u < grid2.u; u++) {
-              var idx = v * grid2.u + u;
-              var key = grid2.data[idx];
-              if (key === 0 || handled[idx]) continue;
-
-              var w = 1;
-              while (u + w < grid2.u && grid2.data[v * grid2.u + u + w] === key && !handled[v * grid2.u + u + w]) w++;
-
-              var h = 1;
-              var rowDone = false;
-              while (!rowDone && v + h < grid2.v) {
-                for (var kx = u; kx < u + w; kx++) {
-                  if (grid2.data[(v + h) * grid2.u + kx] !== key || handled[(v + h) * grid2.u + kx]) {
-                    rowDone = true;
-                    break;
+              var nx = x + face.d[0];
+              var ny = y + face.d[1];
+              var nz = z + face.d[2];
+              if (!isTransparent) {
+                if (ny >= 0 && ny < WORLD_HEIGHT) {
+                  var nflx = nx - cx0;
+                  var nflz = nz - cz0;
+                  var nid;
+                  if (nflx >= 0 && nflz >= 0 && nflx < chunkSize && nflz < chunkSize) {
+                    nid = data[(nflx * chunkSize + nflz) * WORLD_HEIGHT + ny];
+                  } else {
+                    nid = self.get(nx, ny, nz);
+                  }
+                  if (nid !== BLOCK.AIR) {
+                    var ndef = BLOCK_DEFS[nid];
+                    if (ndef && AllDogs.textures.occludesTexture(ndef.texture)) continue;
                   }
                 }
-                if (!rowDone) h++;
               }
 
-              for (var yy = v; yy < v + h; yy++) {
-                for (var xx = u; xx < u + w; xx++) handled[yy * grid2.u + xx] = 1;
+              var gridU = face.uIdx === 1 ? y : (face.uIdx === 0 ? x - cx0 : z - cz0);
+              var gridV = face.vIdx === 1 ? y : (face.vIdx === 0 ? x - cx0 : z - cz0);
+              var plane = face.planeIdx === 0 ? x : face.planeIdx === 1 ? y : z;
+              if (face.d[face.planeIdx] > 0) plane += 1;
+              if (isTransparent) {
+                var tnid;
+                if (ny < 0 || ny >= WORLD_HEIGHT) tnid = BLOCK.BEDROCK;
+                else {
+                  var tflx = nx - cx0;
+                  var tflz = nz - cz0;
+                  if (tflx >= 0 && tflz >= 0 && tflx < chunkSize && tflz < chunkSize) {
+                    tnid = data[(tflx * chunkSize + tflz) * WORLD_HEIGHT + ny];
+                  } else {
+                    tnid = self.get(nx, ny, nz);
+                  }
+                }
+                if (tnid !== BLOCK.AIR) {
+                  if (face.d[face.planeIdx] > 0) plane -= FACE_EPS;
+                  else plane += FACE_EPS;
+                }
               }
 
-              var quads = quadsByKey.get(key);
-              if (!quads) { quads = []; quadsByKey.set(key, quads); }
-              quads.push({ f: f4, u0: u, v0: v, w: w, h: h, plane: planeEntry[0] });
-              u += w - 1;
+              var grids = faceGrids[f3];
+              var grid = grids.get(plane);
+              if (!grid) {
+                grid = makeGrid(face.uSize, face.vSize);
+                grids.set(plane, grid);
+              }
+              grid.data[gridV * grid.u + gridU] = this.keyId(job, faceKey(tex, f3, def.axis || 'y', def.yaw));
             }
           }
         }
+        job.lx++;
+        if (++batch >= 4) return;
       }
+      job.phase = 'greedy';
+      job.greedyF = 0;
+      job.quadsByKey = new Map();
+      job.flat = [];
+      for (var f4 = 0; f4 < FACES.length; f4++) {
+        for (var pe of faceGrids[f4]) job.flat.push([f4, pe]);
+      }
+      job.greedyPi = 0;
+      job.greedyGrid = null;
+      job.greedyHandled = null;
+      job.greedyV = 0;
+    }
 
-      var meshes = [];
-      for (var entry of quadsByKey) {
-        var quads2 = entry[1];
-        var key = idToKey[entry[0] - 1];
+    keyId(job, key) {
+      var id = job.keyIds.get(key);
+      if (id === undefined) {
+        id = job.idToKey.length + 1;
+        job.keyIds.set(key, id);
+        job.idToKey.push(key);
+      }
+      return id;
+    }
+
+    stepGreedyPhase(job) {
+      if (job.greedyPi >= job.flat.length) { job.phase = 'assemble'; job.assembleI = 0; job.assembleKeys = []; for (var k of job.quadsByKey.keys()) job.assembleKeys.push(k); return; }
+      var entry = job.flat[job.greedyPi];
+      var f4 = entry[0];
+      var planeEntry = entry[1];
+      var grid2 = planeEntry[1];
+      if (job.greedyGrid !== grid2) {
+        job.greedyGrid = grid2;
+        job.greedyHandled = new Uint8Array(grid2.u * grid2.v);
+        job.greedyV = 0;
+      }
+      var handled = job.greedyHandled;
+      var quadsByKey = job.quadsByKey;
+      var batch = 0;
+      while (job.greedyV < grid2.v) {
+        var v = job.greedyV;
+        for (var u = 0; u < grid2.u; u++) {
+          var idx = v * grid2.u + u;
+          var key = grid2.data[idx];
+          if (key === 0 || handled[idx]) continue;
+
+          var w = 1;
+          while (u + w < grid2.u && grid2.data[v * grid2.u + u + w] === key && !handled[v * grid2.u + u + w]) w++;
+
+          var h = 1;
+          var rowDone = false;
+          while (!rowDone && v + h < grid2.v) {
+            for (var kx = u; kx < u + w; kx++) {
+              if (grid2.data[(v + h) * grid2.u + kx] !== key || handled[(v + h) * grid2.u + kx]) {
+                rowDone = true;
+                break;
+              }
+            }
+            if (!rowDone) h++;
+          }
+
+          for (var yy = v; yy < v + h; yy++) {
+            for (var xx = u; xx < u + w; xx++) handled[yy * grid2.u + xx] = 1;
+          }
+
+          var quads = quadsByKey.get(key);
+          if (!quads) { quads = []; quadsByKey.set(key, quads); }
+          quads.push({ f: f4, u0: u, v0: v, w: w, h: h, plane: planeEntry[0] });
+          u += w - 1;
+        }
+        job.greedyV++;
+        if (++batch >= 8) return;
+      }
+      job.greedyPi++;
+      job.greedyGrid = null;
+    }
+
+    stepAssemblePhase(job) {
+      var cx0 = job.cx0;
+      var cz0 = job.cz0;
+      var group = job.group;
+      var batch = 0;
+      while (job.assembleI < job.assembleKeys.length) {
+        var keyId = job.assembleKeys[job.assembleI];
+        var key = job.idToKey[keyId - 1];
+        var quads2 = job.quadsByKey.get(keyId);
         var positions = [], normals = [], uvs = [], indices = [];
         var verts = 0;
 
-        for (var q of quads2) {
+        for (var qi = 0; qi < quads2.length; qi++) {
+          var q = quads2[qi];
           var qFace = FACES[q.f];
           var uMin = qFace.uIdx === 1 ? q.u0 : (qFace.uIdx === 0 ? cx0 : cz0) + q.u0;
           var vMin = qFace.vIdx === 1 ? q.v0 : (qFace.vIdx === 0 ? cx0 : cz0) + q.v0;
           for (var c = 0; c < 4; c++) {
             var cv = qFace.corners[c];
-            var p = [0, 0, 0];
-            p[qFace.planeIdx] = q.plane;
-            p[qFace.uIdx] = uMin + cv[0] * q.w;
-            p[qFace.vIdx] = vMin + cv[1] * q.h;
-            positions.push(p[0], p[1], p[2]);
+            var px = 0, py = 0, pz = 0;
+            if (qFace.planeIdx === 0) px = q.plane;
+            else if (qFace.planeIdx === 1) py = q.plane;
+            else pz = q.plane;
+            if (qFace.uIdx === 0) px = uMin + cv[0] * q.w;
+            else if (qFace.uIdx === 1) py = uMin + cv[0] * q.w;
+            else pz = uMin + cv[0] * q.w;
+            if (qFace.vIdx === 0) px = vMin + cv[1] * q.h;
+            else if (qFace.vIdx === 1) py = vMin + cv[1] * q.h;
+            else pz = vMin + cv[1] * q.h;
+            positions.push(px, py, pz);
             normals.push(qFace.d[0], qFace.d[1], qFace.d[2]);
             uvs.push(cv[0] * q.w, cv[1] * q.h);
           }
@@ -527,13 +720,15 @@
 
         var mesh = new THREE.Mesh(geo, AllDogs.textures.getMaterial(key));
         mesh.userData.blockId = blocks.keyToId(key);
-        mesh.userData.chunkX = cx;
-        mesh.userData.chunkZ = cz;
-        group.add(mesh);
-        meshes.push(mesh);
-      }
+        mesh.userData.chunkX = job.cx;
+        mesh.userData.chunkZ = job.cz;
+        if (group) group.add(mesh);
+        job.meshes.push(mesh);
 
-      return meshes;
+        job.assembleI++;
+        if (++batch >= 8) return;
+      }
+      job.phase = 'done';
     }
   }
 
