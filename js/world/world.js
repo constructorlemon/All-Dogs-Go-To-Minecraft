@@ -248,6 +248,7 @@
       var job = this.beginChunk(cx, cz, chunkSize, group);
       var guard = 0;
       while (job.phase !== 'done' && guard < 1000000) { this.stepChunk(job, Infinity); guard++; }
+      this.chunkMeshes.set(cx + ',' + cz, { cx: cx, cz: cz, meshes: job.meshes });
       return job.meshes;
     }
 
@@ -423,20 +424,20 @@
     stepChunk(job, deadline) {
       var now = function () { return (typeof performance !== 'undefined' ? performance.now() : Date.now()); };
       while (job.phase !== 'done') {
-        this.stepChunkPhase(job);
+        this.stepChunkPhase(job, deadline);
         if (now() > deadline) return;
       }
     }
 
-    stepChunkPhase(job) {
-      if (job.phase === 'data') return this.stepDataPhase(job);
-      if (job.phase === 'mesh') return this.stepMeshPhase(job);
-      if (job.phase === 'greedy') return this.stepGreedyPhase(job);
-      if (job.phase === 'assemble') return this.stepAssemblePhase(job);
+    stepChunkPhase(job, deadline) {
+      if (job.phase === 'data') return this.stepDataPhase(job, deadline);
+      if (job.phase === 'mesh') return this.stepMeshPhase(job, deadline);
+      if (job.phase === 'greedy') return this.stepGreedyPhase(job, deadline);
+      if (job.phase === 'assemble') return this.stepAssemblePhase(job, deadline);
       job.phase = 'done';
     }
 
-    stepDataPhase(job) {
+    stepDataPhase(job, deadline) {
       var cx = job.cx;
       var cz = job.cz;
       var cx0 = job.cx0 = cx * CHUNK_SIZE;
@@ -455,6 +456,7 @@
 
       if (job.sub === 'terrain') {
         var batch = 0;
+        var nowT = function () { return (typeof performance !== 'undefined' ? performance.now() : Date.now()); };
         while (job.col < CHUNK_SIZE) {
           var lx = job.col;
           var x = cx0 + lx;
@@ -472,7 +474,8 @@
             }
           }
           job.col++;
-          if (++batch >= 4) return;
+          if (++batch >= 2 && nowT() > deadline) return;
+          if (batch >= 16) return;
         }
         job.sub = 'trees';
         job.gx = job.treeGx;
@@ -481,11 +484,13 @@
 
       if (job.sub === 'trees') {
         var tbatch = 0;
+        var nowTr = function () { return (typeof performance !== 'undefined' ? performance.now() : Date.now()); };
         while (job.gx < job.treeEndX) {
           if (AllDogs.worldgen.hasTree(job.gx, job.gz)) this.writeTree(data, cx0, cz0, job.gx, job.gz);
           job.gz++;
           if (job.gz >= job.treeEndZ) { job.gz = job.treeGz; job.gx++; }
-          if (++tbatch >= 40) return;
+          if (nowTr() > deadline) return;
+          if (++tbatch >= 400) return;
         }
         job.sub = 'stamp';
       }
@@ -520,7 +525,7 @@
       }
     }
 
-    stepMeshPhase(job) {
+    stepMeshPhase(job, deadline) {
       var chunkSize = job.chunkSize;
       var cx0 = job.cx0;
       var cz0 = job.cz0;
@@ -528,6 +533,7 @@
       var faceGrids = job.faceGrids;
       var self = this;
       var batch = 0;
+      var nowM = function () { return (typeof performance !== 'undefined' ? performance.now() : Date.now()); };
       while (job.lx < chunkSize) {
         var lx = job.lx;
         var x = cx0 + lx;
@@ -597,7 +603,8 @@
           }
         }
         job.lx++;
-        if (++batch >= 4) return;
+        if (++batch >= 2 && nowM() > deadline) return;
+        if (batch >= 4) return;
       }
       job.phase = 'greedy';
       job.greedyF = 0;
@@ -622,60 +629,72 @@
       return id;
     }
 
-    stepGreedyPhase(job) {
+    stepGreedyPhase(job, deadline) {
       if (job.greedyPi >= job.flat.length) { job.phase = 'assemble'; job.assembleI = 0; job.assembleKeys = []; for (var k of job.quadsByKey.keys()) job.assembleKeys.push(k); return; }
-      var entry = job.flat[job.greedyPi];
-      var f4 = entry[0];
-      var planeEntry = entry[1];
-      var grid2 = planeEntry[1];
-      if (job.greedyGrid !== grid2) {
-        job.greedyGrid = grid2;
-        job.greedyHandled = new Uint8Array(grid2.u * grid2.v);
-        job.greedyV = 0;
-      }
-      var handled = job.greedyHandled;
-      var quadsByKey = job.quadsByKey;
-      var batch = 0;
-      while (job.greedyV < grid2.v) {
-        var v = job.greedyV;
-        for (var u = 0; u < grid2.u; u++) {
-          var idx = v * grid2.u + u;
-          var key = grid2.data[idx];
-          if (key === 0 || handled[idx]) continue;
-
-          var w = 1;
-          while (u + w < grid2.u && grid2.data[v * grid2.u + u + w] === key && !handled[v * grid2.u + u + w]) w++;
-
-          var h = 1;
-          var rowDone = false;
-          while (!rowDone && v + h < grid2.v) {
-            for (var kx = u; kx < u + w; kx++) {
-              if (grid2.data[(v + h) * grid2.u + kx] !== key || handled[(v + h) * grid2.u + kx]) {
-                rowDone = true;
-                break;
-              }
-            }
-            if (!rowDone) h++;
-          }
-
-          for (var yy = v; yy < v + h; yy++) {
-            for (var xx = u; xx < u + w; xx++) handled[yy * grid2.u + xx] = 1;
-          }
-
-          var quads = quadsByKey.get(key);
-          if (!quads) { quads = []; quadsByKey.set(key, quads); }
-          quads.push({ f: f4, u0: u, v0: v, w: w, h: h, plane: planeEntry[0] });
-          u += w - 1;
+      var nowG = function () { return (typeof performance !== 'undefined' ? performance.now() : Date.now()); };
+      var planesThisCall = 0;
+      while (job.greedyPi < job.flat.length) {
+        var entry = job.flat[job.greedyPi];
+        var f4 = entry[0];
+        var planeEntry = entry[1];
+        var grid2 = planeEntry[1];
+        if (job.greedyGrid !== grid2) {
+          job.greedyGrid = grid2;
+          job.greedyHandled = new Uint8Array(grid2.u * grid2.v);
+          job.greedyV = 0;
         }
-        job.greedyV++;
-        if (++batch >= 8) return;
+        var handled = job.greedyHandled;
+        var quadsByKey = job.quadsByKey;
+        var batch = 0;
+        while (job.greedyV < grid2.v) {
+          var v = job.greedyV;
+          for (var u = 0; u < grid2.u; u++) {
+            var idx = v * grid2.u + u;
+            var key = grid2.data[idx];
+            if (key === 0 || handled[idx]) continue;
+
+            var w = 1;
+            while (u + w < grid2.u && grid2.data[v * grid2.u + u + w] === key && !handled[v * grid2.u + u + w]) w++;
+
+            var h = 1;
+            var rowDone = false;
+            while (!rowDone && v + h < grid2.v) {
+              for (var kx = u; kx < u + w; kx++) {
+                if (grid2.data[(v + h) * grid2.u + kx] !== key || handled[(v + h) * grid2.u + kx]) {
+                  rowDone = true;
+                  break;
+                }
+              }
+              if (!rowDone) h++;
+            }
+
+            for (var yy = v; yy < v + h; yy++) {
+              for (var xx = u; xx < u + w; xx++) handled[yy * grid2.u + xx] = 1;
+            }
+
+            var quads = quadsByKey.get(key);
+            if (!quads) { quads = []; quadsByKey.set(key, quads); }
+            quads.push({ f: f4, u0: u, v0: v, w: w, h: h, plane: planeEntry[0] });
+            u += w - 1;
+          }
+          job.greedyV++;
+          if (++batch >= 2 && nowG() > deadline) return;
+          if (batch >= 4) return;
+        }
+        job.greedyPi++;
+        job.greedyGrid = null;
+        planesThisCall++;
+        if (planesThisCall >= 2 && nowG() > deadline) return;
       }
-      job.greedyPi++;
-      job.greedyGrid = null;
+      job.phase = 'assemble';
+      job.assembleI = 0;
+      job.assembleKeys = [];
+      for (var k2 of job.quadsByKey.keys()) job.assembleKeys.push(k2);
     }
 
-    stepAssemblePhase(job) {
+    stepAssemblePhase(job, deadline) {
       var cx0 = job.cx0;
+      var nowA = function () { return (typeof performance !== 'undefined' ? performance.now() : Date.now()); };
       var cz0 = job.cz0;
       var group = job.group;
       var batch = 0;
@@ -726,7 +745,8 @@
         job.meshes.push(mesh);
 
         job.assembleI++;
-        if (++batch >= 8) return;
+        if (nowA() > deadline) return;
+        if (++batch >= 4) return;
       }
       job.phase = 'done';
     }

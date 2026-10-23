@@ -138,7 +138,75 @@
   }
 
   var placementCache = new Map();
-  var PLACEMENT_CACHE_MAX = 512;
+  var PLACEMENT_CACHE_MAX = 4096;
+  var CACHE_RADIUS = 8;
+  var CACHE_VERSION = 1;
+  var CACHE_KEY = 'adsgtm.placements';
+
+  function defsSignature() {
+    var parts = [];
+    for (var d = 0; d < order.length; d++) {
+      var def = defs[order[d]];
+      var sizes = [];
+      for (var v = 0; v < def.variants.length; v++) sizes.push(def.variants[v].size);
+      var sp = def.spawn || {};
+      parts.push(order[d] + ':' + def.maxSize + ':' + sizes.join('.') + ':' + (sp.spacing || 0) + ':' + (sp.attempts || 0));
+    }
+    return parts.join('|');
+  }
+
+  function serializePlacements(list) {
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i];
+      var vi = p.def.variants.indexOf(p.variant);
+      out.push([p.def.name, vi, p.x, p.z, p.base, p.turns]);
+    }
+    return out;
+  }
+
+  function hydratePlacements(recs) {
+    var out = [];
+    for (var i = 0; i < recs.length; i++) {
+      var rec = recs[i];
+      var def = defs[rec[0]];
+      if (!def) continue;
+      var variant = def.variants[rec[1]] || def.variants[0];
+      out.push({ def: def, variant: variant, x: rec[2], z: rec[3], base: rec[4], turns: rec[5], size: variant.size });
+    }
+    return out;
+  }
+
+  function exportCache(seed) {
+    var data = {};
+    for (var pair of placementCache) data[pair[0]] = serializePlacements(pair[1]);
+    return { v: CACHE_VERSION, seed: seed, defs: defsSignature(), radius: CACHE_RADIUS, data: data };
+  }
+
+  function importCache(obj, seed) {
+    if (!obj || obj.v !== CACHE_VERSION) return false;
+    if (obj.seed !== seed || obj.defs !== defsSignature()) return false;
+    placementCache.clear();
+    for (var key in obj.data) placementCache.set(key, hydratePlacements(obj.data[key]));
+    return true;
+  }
+
+  function precomputeAround(radius, budgetMs, state) {
+    if (!state) state = { i: 0 };
+    var side = radius * 2 + 1;
+    var start = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    var now = function () { return (typeof performance !== 'undefined' ? performance.now() : Date.now()); };
+    while (state.i < side * side) {
+      var idx = state.i;
+      var cx = (idx % side) - radius;
+      var cz = Math.floor(idx / side) - radius;
+      placements(cx, cz);
+      state.i++;
+      if (now() - start > budgetMs) break;
+    }
+    state.total = side * side;
+    return state.i >= state.total;
+  }
 
   function placements(cx, cz) {
     var ckey = cx + ',' + cz;
@@ -224,6 +292,11 @@
     rotate: rotate,
     placements: placements,
     stamp: stamp,
-    entitiesFor: entitiesFor
+    entitiesFor: entitiesFor,
+    precomputeAround: precomputeAround,
+    exportCache: exportCache,
+    importCache: importCache,
+    cacheKey: CACHE_KEY,
+    cacheRadius: CACHE_RADIUS
   };
 })();

@@ -546,6 +546,51 @@ body {
   display: none;
 }
 
+#loading-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+  background: #1b1b1b;
+  color: #fff;
+  font-family: "Courier New", monospace;
+}
+
+#loading-screen[hidden] {
+  display: none;
+}
+
+#loading-title {
+  font-size: clamp(22px, 5vw, 40px);
+  letter-spacing: 1px;
+  text-shadow: 2px 3px 0 rgba(0, 0, 0, 0.6);
+}
+
+#loading-bar-outer {
+  width: min(360px, 70vw);
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+#loading-bar-fill {
+  width: 0%;
+  height: 100%;
+  background: #7fbf45;
+  transition: width 0.08s linear;
+}
+
+#loading-text {
+  font-size: 13px;
+  opacity: 0.8;
+}
+
 #overlay h1 {
   font-size: clamp(28px, 6vw, 52px);
   font-family: "Courier New", monospace;

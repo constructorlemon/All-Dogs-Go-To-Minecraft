@@ -93,7 +93,7 @@
     var tries = 0;
     function run() {
       tries++;
-      if (!window.game) {
+      if (!window.game || !(window.game instanceof AllDogs.Game)) {
         if (tries < 400) return setTimeout(run, 25);
         results.push('NOGAME');
         return report();
@@ -160,17 +160,67 @@
         results.push('far=' + WG.heightAt(12000, -8431));
 
         g.world.clear();
+        var _t0 = (performance || Date).now();
+        g.world.updateChunks(0, 0, 2, 16, g.worldGroup, 1000, 10000);
+        var _t1 = (performance || Date).now();
+        results.push('buildAll=' + (_t1 - _t0).toFixed(1) + 'ms/' + g.world.chunkMeshes.size);
+        g.world.clear();
+        var _bt = 0, _calls = 0, _slow = [];
+        for (var _f = 0; _f < 200 && g.world.chunkMeshes.size < 121; _f++) {
+          var _s = (performance || Date).now();
+          g.world.updateChunks(0, 0, 5, 16, g.worldGroup, 1, 6);
+          var _e = (performance || Date).now();
+          if (_e - _s > _bt) _bt = _e - _s;
+          _slow.push([Math.round(_e - _s), _f]);
+          _calls++;
+        }
+        _slow.sort(function (a, b) { return b[0] - a[0]; });
+        results.push('streamMax=' + _bt.toFixed(1) + 'ms,calls=' + _calls + ',chunks=' + g.world.chunkMeshes.size);
+        results.push('topSlow=' + _slow.slice(0, 5).map(function (x) { return x[0] + '@' + x[1]; }).join(','));
+        g.world.clear();
         g.world.updateChunks(0, 0, 2, 16, g.worldGroup, 1000, 10000);
         results.push('chunks=' + g.world.chunkMeshes.size);
         results.push('meshes=' + g.world.collectMeshes().length);
         results.push('gen=' + g.world.get(0, WG.heightAt(0, 0), 0));
+        function meshSig() {
+          var ms = g.world.collectMeshes();
+          var v = 0, m = 0;
+          for (var mi = 0; mi < ms.length; mi++) {
+            m++;
+            var pa = ms[mi].geometry.getAttribute('position');
+            if (pa) v += pa.count;
+          }
+          return m + ':' + v;
+        }
+        var sigBefore = meshSig();
         g.world.set(0, WG.heightAt(0, 0), 0, 0);
         results.push('broke=' + g.world.get(0, WG.heightAt(0, 0), 0));
         g.world.rebuildChunk(0, 0, 16, g.worldGroup);
+        var sigAfter = meshSig();
+        results.push('meshSig=' + sigBefore + '->' + sigAfter + ',changed=' + (sigBefore === sigAfter ? 0 : 1));
         results.push('afterRebuild=' + g.world.get(0, WG.heightAt(0, 0), 0));
         g.world.set(0, WG.heightAt(0, 0), 0, 0);
         g.world.set(0, WG.heightAt(0, 0), 0, AllDogs.blocks.BLOCK.GRASS);
         results.push('restored=' + g.world.get(0, WG.heightAt(0, 0), 0));
+
+        g.world.clear();
+        g.world.updateChunks(0, 0, 2, 16, g.worldGroup, 1000, 10000);
+        g.worldMeshes = g.world.collectMeshes();
+        var gh = WG.heightAt(0, 0);
+        var gameSig = function () {
+          var ms = g.worldMeshes; var v = 0;
+          for (var gi = 0; gi < ms.length; gi++) {
+            var pa = ms[gi].geometry.getAttribute('position');
+            if (pa) v += pa.count;
+          }
+          return ms.length + ':' + v;
+        };
+        var gsBefore = gameSig();
+        g.world.set(0, gh, 0, 0);
+        g.rebuildChunksFor(0, gh, 0);
+        var gsAfter = gameSig();
+        results.push('gamePath=' + gsBefore + '->' + gsAfter + ',changed=' + (gsBefore === gsAfter ? 0 : 1));
+        results.push('gameBroke=' + g.world.get(0, gh, 0));
 
         var ST = AllDogs.structures;
         results.push('st=' + (ST ? 1 : 0));
@@ -266,7 +316,7 @@
           results.push('emSign=' + ss);
         }
       } catch (err) {
-        results.push('EXC:' + String(e && e.message ? e.message : err));
+        results.push('EXC:' + String(err && err.message ? err.message : err));
       }
       report();
     }
