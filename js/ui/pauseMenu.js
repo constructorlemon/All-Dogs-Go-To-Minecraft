@@ -26,7 +26,7 @@
         window.location.href = 'controls.html';
       });
       this.addButton(panel, 'Main Menu', function () {
-        window.location.href = 'worlds.html';
+        window.location.href = 'index.html';
       });
 
       this.status = document.createElement('div');

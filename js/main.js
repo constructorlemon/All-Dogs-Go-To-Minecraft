@@ -16,7 +16,7 @@
       : readConfig();
 
     if (!config) {
-      window.location.replace('worlds.html');
+      window.location.replace('index.html');
       return;
     }
 

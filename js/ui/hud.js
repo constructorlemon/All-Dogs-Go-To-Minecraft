@@ -33,11 +33,13 @@
     }
 
     showOverlay(text) {
+      if (!this.overlay || !this.overlayText) return;
       this.overlay.hidden = false;
       this.overlayText.textContent = text;
     }
 
     hideOverlay() {
+      if (!this.overlay) return;
       this.overlay.hidden = true;
     }
   }

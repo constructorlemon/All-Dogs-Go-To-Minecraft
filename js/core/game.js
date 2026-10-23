@@ -77,7 +77,6 @@ this.started = false;
       this.panel = new AllDogs.InventoryPanel();
       this.signEditor = new AllDogs.SignEditor();
       this.debug = new AllDogs.DebugHud();
-      this.menuDebug = new AllDogs.MainDebug();
       this.pauseMenu = new AllDogs.PauseMenu(this);
       var self = this;
       this.signEditor.onClose = function () { self.closeSignEditor(); };
@@ -136,7 +135,6 @@ this.started = false;
 
 
       this.bindEvents();
-      this.hud.showOverlay('Click to start');
     }
 
 
@@ -147,7 +145,14 @@ this.started = false;
 
 
       canvas.addEventListener('mousedown', function (e) {
-        if (!self.input.locked || self.inventoryOpen || self.signEditor.active) return;
+        if (!self.input.locked) {
+          if (self.inventoryOpen || self.signEditor.active) return;
+          if (self.pauseMenu && self.pauseMenu.visible) return;
+          self.enterFullscreen();
+          self.input.requestLock();
+          return;
+        }
+        if (self.inventoryOpen || self.signEditor.active) return;
         if (e.button === 0) self.tryBreak();
         else if (e.button === 2) self.tryPlace();
       });
@@ -160,36 +165,12 @@ this.started = false;
       this.input.onLockChange = function () {
         if (self.input.locked) {
           self.started = true;
-          self.menuDebug.hide();
-          self.hud.hideOverlay();
+          self.hud.setHint(self.hud.baseHint);
         } else if (!self.inventoryOpen && !self.signEditor.active &&
           !(self.pauseMenu && self.pauseMenu.visible)) {
-          self.hud.showOverlay(self.started ? 'Click to resume' : 'Click to start');
+          self.hud.setHint('Click to play');
         }
       };
-
-
-      document.getElementById('overlay').addEventListener('click', function () {
-        if (self.menuDebug.visible) return;
-        if (self.pauseMenu && self.pauseMenu.visible) return;
-        self.enterFullscreen();
-        self.input.requestLock();
-      });
-
-
-      document.getElementById('overlay-creative').addEventListener('click', function () {
-        if (self.menuDebug.visible) return;
-        self.enterCreative();
-        self.enterFullscreen();
-        self.input.requestLock();
-      });
-
-
-      document.getElementById('overlay-instructions').addEventListener('click', function (e) {
-        if (self.menuDebug.visible) return;
-        e.stopPropagation();
-        window.location.href = 'controls.html';
-      });
 
 
       window.addEventListener('beforeunload', function (e) {
@@ -502,8 +483,7 @@ this.started = false;
         return;
       }
       if (this.input.consumePressed('F3')) {
-        if (this.started) this.debug.toggle();
-        else this.menuDebug.toggle();
+        this.debug.toggle();
         return;
       }
       if (this.input.consumePressed('KeyE')) {
