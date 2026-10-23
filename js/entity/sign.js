@@ -136,6 +136,10 @@
       this.renderText();
     }
 
+    savePos() {
+      return { x: this.pos.x, y: this.groundY, z: this.pos.z };
+    }
+
     interact(ctx) {
       if (ctx && ctx.openSignEditor) ctx.openSignEditor(this);
     }

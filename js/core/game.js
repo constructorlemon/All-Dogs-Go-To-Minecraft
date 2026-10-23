@@ -38,6 +38,8 @@ this.started = false;
       this.targetEntity = null;
       this.worldMeshes = [];
       this.structureEntities = {};
+      this.entityRemovals = {};
+      this.signTextEdits = {};
       this.target = null;
       this.chunkSize = C.CHUNK_SIZE;
 
@@ -76,8 +78,10 @@ this.started = false;
       this.signEditor = new AllDogs.SignEditor();
       this.debug = new AllDogs.DebugHud();
       this.menuDebug = new AllDogs.MainDebug();
+      this.pauseMenu = new AllDogs.PauseMenu(this);
       var self = this;
       this.signEditor.onClose = function () { self.closeSignEditor(); };
+      this.signEditor.onCommit = function (entity, lines) { self.recordSignEdit(entity, lines); };
       this.panel.onMove = function (fromIdx, fromZone, toIdx, toZone, count) {
         self.handleItemMove(fromIdx, fromZone, toIdx, toZone, count);
       };
@@ -158,7 +162,8 @@ this.started = false;
           self.started = true;
           self.menuDebug.hide();
           self.hud.hideOverlay();
-        } else if (!self.inventoryOpen && !self.signEditor.active) {
+        } else if (!self.inventoryOpen && !self.signEditor.active &&
+          !(self.pauseMenu && self.pauseMenu.visible)) {
           self.hud.showOverlay(self.started ? 'Click to resume' : 'Click to start');
         }
       };
@@ -166,6 +171,7 @@ this.started = false;
 
       document.getElementById('overlay').addEventListener('click', function () {
         if (self.menuDebug.visible) return;
+        if (self.pauseMenu && self.pauseMenu.visible) return;
         self.enterFullscreen();
         self.input.requestLock();
       });
@@ -231,6 +237,29 @@ this.started = false;
       this.inventory.setCreative();
       this.hud.flash('Creative mode: all blocks granted');
       this.refreshUI();
+    }
+
+
+    saveWorld() {
+      if (!AllDogs.worldSave) return false;
+      var text = AllDogs.worldSave.serialize(this);
+      var seed = AllDogs.worldgen && AllDogs.worldgen.getSeed
+        ? AllDogs.worldgen.getSeed()
+        : (AllDogs.constants.SEED || 0);
+      var blob = new Blob([text], { type: 'text/plain' });
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement('a');
+      link.href = url;
+      link.download = 'adsgtm-world-' + seed + '.txt';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+      if (this.pauseMenu && this.pauseMenu.visible) {
+        this.pauseMenu.status.textContent = 'Saved adsgtm-world-' + seed + '.txt';
+      }
+      this.hud.flash('World saved');
+      return true;
     }
 
 
@@ -399,14 +428,47 @@ this.started = false;
     }
 
 
+    entitySavePos(entity) {
+      var p = entity && typeof entity.savePos === 'function' ? entity.savePos() : entity.pos;
+      return { x: p.x, y: p.y, z: p.z };
+    }
+
+
+    entityKeyOf(type, x, y, z) {
+      var r = function (v) { return Math.round(v * 1000) / 1000; };
+      return type + '@' + r(x) + ',' + r(y) + ',' + r(z);
+    }
+
+
+    addGeneratedEntity(config) {
+      var pos = config.pos;
+      var key = this.entityKeyOf(config.type, pos.x, pos.y, pos.z);
+      if (this.entityRemovals[key]) return null;
+      var entity = this.entityManager.create(config.type, config);
+      if (!entity) return null;
+      entity.generated = true;
+      this.entityManager.add(entity);
+      if (entity.solidBlock) this.world.addCollider(entity);
+      if (entity.type === 'sign' && this.signTextEdits[key]) {
+        entity.setText(this.signTextEdits[key].text);
+      }
+      return entity;
+    }
+
+
+    recordSignEdit(entity, lines) {
+      if (!entity || !entity.generated || entity.type !== 'sign') return;
+      var p = this.entitySavePos(entity);
+      this.signTextEdits[this.entityKeyOf('sign', p.x, p.y, p.z)] = {
+        x: p.x, y: p.y, z: p.z, text: (lines || []).slice()
+      };
+    }
+
+
     spawnZoneEntities(zone) {
       var configs = zone.entities();
       for (var i = 0; i < configs.length; i++) {
-        var e = this.entityManager.create(configs[i].type, configs[i]);
-        if (e) {
-          this.entityManager.add(e);
-          if (e.solidBlock) this.world.addCollider(e);
-        }
+        this.addGeneratedEntity(configs[i]);
       }
     }
 
@@ -426,8 +488,17 @@ this.started = false;
 
 
     handleKeys() {
+      if (this.pauseMenu && this.pauseMenu.visible) {
+        if (this.input.consumePressed('KeyM')) this.pauseMenu.close();
+        this.input.resetLook();
+        return;
+      }
       if (this.signEditor.active) {
         this.input.resetLook();
+        return;
+      }
+      if (this.input.consumePressed('KeyM')) {
+        if (this.started && !this.inventoryOpen) this.pauseMenu.open();
         return;
       }
       if (this.input.consumePressed('F3')) {
@@ -577,6 +648,12 @@ this.started = false;
       if (this.targetEntity) {
         var ent = this.targetEntity;
         var itemId = ent.itemId || null;
+        if (ent.generated) {
+          var ep = this.entitySavePos(ent);
+          this.entityRemovals[this.entityKeyOf(ent.type, ep.x, ep.y, ep.z)] = {
+            type: ent.type, x: ep.x, y: ep.y, z: ep.z
+          };
+        }
         if (ent.solidBlock) this.world.removeCollider(ent);
         this.entityManager.remove(ent);
         this.targetEntity = null;
@@ -794,11 +871,8 @@ this.started = false;
         var made = AllDogs.structures.entitiesFor(cx, cz);
         var ids = [];
         for (var i = 0; i < made.length; i++) {
-          var e = this.entityManager.create(made[i].type, made[i]);
-          if (!e) continue;
-          this.entityManager.add(e);
-          if (e.solidBlock) this.world.addCollider(e);
-          ids.push(e);
+          var e = this.addGeneratedEntity(made[i]);
+          if (e) ids.push(e);
         }
         tracked[key] = ids;
       }

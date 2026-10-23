@@ -56,6 +56,7 @@
         lines.push(raw[i].replace(/\s+$/, ''));
       }
       if (this.entity) this.entity.setText(lines);
+      if (this.onCommit) this.onCommit(this.entity, lines);
       if (this.onClose) this.onClose();
     }
 

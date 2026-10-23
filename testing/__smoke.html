@@ -49,6 +49,7 @@
   <script src="../js/world/world.js"></script>
   <script src="../js/world/structures/structure.js"></script>
   <script src="../js/world/structures/house.js"></script>
+  <script src="../js/world/worldSave.js"></script>
   <script src="../js/world/drops.js"></script>
   <script src="../js/entity/entity.js"></script>
   <script src="../js/entity/sign.js"></script>
@@ -71,9 +72,11 @@
   <script src="../js/ui/inventoryPanel.js"></script>
   <script src="../js/ui/debug.js"></script>
   <script src="../js/ui/menuDebug.js"></script>
+  <script src="../js/ui/pauseMenu.js"></script>
   <script src="../js/mods/manifest.js"></script>
   <script src="../js/mods/modLoader.js"></script>
   <script src="../js/core/game.js"></script>
+  <script>window.ADSGTM_AUTOSTART = true;</script>
   <script src="../js/main.js"></script>
 
   <script>
@@ -301,6 +304,29 @@
           results.push('hfurn=' + fcount);
           results.push('fyaw=' + fyaw + ',expect=' + (h.turns % 4));
 
+          var sb = null;
+          for (var sdx = 0; sdx < h.size && !sb; sdx++) {
+            for (var sdz = 0; sdz < h.size && !sb; sdz++) {
+              for (var sdy = 0; sdy < h.variant.height; sdy++) {
+                var sid = ST.blockAt(h.x + sdx, h.base + sdy, h.z + sdz);
+                if (sid) { sb = { x: h.x + sdx, y: h.base + sdy, z: h.z + sdz, id: sid }; break; }
+              }
+            }
+          }
+          if (sb) {
+            var scx = Math.floor(sb.x / 16), scz = Math.floor(sb.z / 16);
+            results.push('sbpos=' + sb.x + ',' + sb.y + ',' + sb.z + ',id=' + sb.id);
+            results.push('sbBefore=' + g.world.get(sb.x, sb.y, sb.z));
+            g.world.set(sb.x, sb.y, sb.z, 0);
+            g.world.rebuildChunk(scx, scz, 16, g.worldGroup);
+            results.push('sbAfterBreak=' + g.world.get(sb.x, sb.y, sb.z));
+            g.world.set(sb.x, sb.y, sb.z, sb.id);
+            g.world.rebuildChunk(scx, scz, 16, g.worldGroup);
+            results.push('sbRestored=' + g.world.get(sb.x, sb.y, sb.z));
+          } else {
+            results.push('sbNONE');
+          }
+
           g.player.pos.set(h.x + 0.5, h.base + 2, h.z + 0.5);
           for (var uf = 0; uf < 40; uf++) {
             g.world.updateChunks(g.player.pos.x, g.player.pos.z, 2, 16, g.worldGroup, 1000, 10000);
@@ -315,6 +341,19 @@
           results.push('emChest=' + sc);
           results.push('emSign=' + ss);
         }
+
+        var wsx = Math.floor(g.player.pos.x) + 3;
+        var wsz = Math.floor(g.player.pos.z) + 3;
+        var wsy = AllDogs.worldgen.heightAt(wsx, wsz) + 1;
+        g.world.set(wsx, wsy, wsz, AllDogs.blocks.BLOCK.PLANKS);
+        var saveBefore = g.world.get(wsx, wsy, wsz);
+        var saveText = AllDogs.worldSave.serialize(g);
+        var saveParsed = AllDogs.worldSave.parse(saveText);
+        results.push('saveSeed=' + saveParsed.seed + ',seedEq=' + (saveParsed.seed === AllDogs.worldgen.getSeed() ? 1 : 0));
+        results.push('saveBlocks=' + saveParsed.blocks.length + ',ver=' + saveParsed.version);
+        g.world.set(wsx, wsy, wsz, 0);
+        AllDogs.worldSave.apply(g, saveParsed);
+        results.push('saveRoundtrip=' + saveBefore + '->' + g.world.get(wsx, wsy, wsz));
       } catch (err) {
         results.push('EXC:' + String(err && err.message ? err.message : err));
       }

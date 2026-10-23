@@ -7,8 +7,22 @@
   var TREE_MIN_GROUND = 4;
 
   var SEED = AllDogs.constants.SEED || 0;
-  var SEED_X = (SEED * 374761393) | 0;
-  var SEED_Z = (SEED * 668265263) | 0;
+  var SEED_X = 0;
+  var SEED_Z = 0;
+
+  function setSeed(value) {
+    var n = Number(value);
+    if (!isFinite(n)) n = AllDogs.constants.SEED || 0;
+    SEED = n | 0;
+    SEED_X = (SEED * 374761393) | 0;
+    SEED_Z = (SEED * 668265263) | 0;
+  }
+
+  function getSeed() {
+    return SEED;
+  }
+
+  setSeed(SEED);
 
   function hash2(x, z) {
     var h = (Math.imul((x | 0) + SEED_X, 374761393) + Math.imul((z | 0) + SEED_Z, 668265263)) | 0;
@@ -98,6 +112,8 @@
   }
 
   AllDogs.worldgen = {
+    setSeed: setSeed,
+    getSeed: getSeed,
     hash2: hash2,
     fbm: fbm,
     heightAt: heightAt,

@@ -36,6 +36,10 @@
       };
     }
 
+    savePos() {
+      return { x: this.pos.x, y: this.pos.y, z: this.pos.z };
+    }
+
     update(dt, ctx) {}
 
     interact(ctx) {}

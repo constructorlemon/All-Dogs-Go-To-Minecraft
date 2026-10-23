@@ -3,10 +3,46 @@
   var AllDogs = (window.AllDogs = window.AllDogs || {});
 
   var container = document.getElementById('game');
+  var configKey = 'adsgtm.world';
+
+  function readConfig() {
+    try { return JSON.parse(sessionStorage.getItem(configKey) || 'null'); }
+    catch (err) { return null; }
+  }
 
   function boot() {
-    preloadStructures(function () {
+    var config = window.ADSGTM_AUTOSTART
+      ? { mode: 'new', seed: AllDogs.constants.SEED, creative: false }
+      : readConfig();
+
+    if (!config) {
+      window.location.replace('worlds.html');
+      return;
+    }
+
+    var parsed = null;
+    var seed;
+    if (config.mode === 'load') {
+      parsed = AllDogs.worldSave.parse(config.text || '');
+      seed = parsed.seed;
+      if (seed === null || seed === undefined || isNaN(seed)) seed = AllDogs.constants.SEED;
+    } else {
+      seed = config.seed !== undefined && config.seed !== null
+        ? config.seed : AllDogs.constants.SEED;
+    }
+
+    if (AllDogs.worldgen && AllDogs.worldgen.setSeed) AllDogs.worldgen.setSeed(seed);
+    if (AllDogs.structures && AllDogs.structures.resetCache) AllDogs.structures.resetCache();
+
+    preloadStructures(seed, function () {
       var game = new AllDogs.Game(container);
+
+      if (parsed && AllDogs.worldSave) {
+        AllDogs.worldSave.apply(game, parsed);
+      } else if (config.creative) {
+        game.enterCreative();
+      }
+
       game.start();
 
       window.addEventListener('resize', function () {
@@ -17,17 +53,17 @@
     });
   }
 
-  function preloadStructures(done) {
+  function preloadStructures(seed, done) {
     var structures = AllDogs.structures;
     var screen = document.getElementById('loading-screen');
     var fill = document.getElementById('loading-bar-fill');
     var text = document.getElementById('loading-text');
-    var seed = AllDogs.constants.SEED;
+    var cacheKey = structures ? structures.cacheKey + ':' + seed : null;
 
     if (!structures) { done(); return; }
 
     var cached = null;
-    try { cached = JSON.parse(localStorage.getItem(structures.cacheKey) || 'null'); }
+    try { cached = JSON.parse(localStorage.getItem(cacheKey) || 'null'); }
     catch (err) { cached = null; }
 
     if (cached && structures.importCache(cached, seed)) {
@@ -49,7 +85,7 @@
       if (fill) fill.style.width = pct + '%';
       if (text) text.textContent = 'Preparing world... ' + pct + '%';
       if (!finished) { requestAnimationFrame(step); return; }
-      try { localStorage.setItem(structures.cacheKey, JSON.stringify(structures.exportCache(seed))); }
+      try { localStorage.setItem(cacheKey, JSON.stringify(structures.exportCache(seed))); }
       catch (err) { }
       if (screen) screen.hidden = true;
       done();

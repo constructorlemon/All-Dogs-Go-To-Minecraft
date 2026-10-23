@@ -191,6 +191,10 @@
     return true;
   }
 
+  function resetCache() {
+    placementCache.clear();
+  }
+
   function precomputeAround(radius, budgetMs, state) {
     if (!state) state = { i: 0 };
     var side = radius * 2 + 1;
@@ -248,6 +252,30 @@
     return vid || id;
   }
 
+  function blockAt(x, y, z) {
+    var cx = Math.floor(x / CHUNK);
+    var cz = Math.floor(z / CHUNK);
+    var list = placements(cx, cz);
+    var result = null;
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i];
+      var layers = compileVariant(p.variant)._ids;
+      var ly = y - p.base;
+      if (ly < 0 || ly >= layers.length) continue;
+      var plane = layers[ly];
+      for (var lz = 0; lz < plane.length; lz++) {
+        var row = plane[lz];
+        for (var lx = 0; lx < row.length; lx++) {
+          var id = row[lx];
+          if (!id) continue;
+          var rr = rotate(lx, lz, p.size, p.turns);
+          if (p.x + rr.x === x && p.z + rr.z === z) result = directionalId(id, p.turns);
+        }
+      }
+    }
+    return result;
+  }
+
   function stamp(world, data, cx, cz) {
     var list = placements(cx, cz);
     if (!list.length) return;
@@ -292,7 +320,9 @@
     rotate: rotate,
     placements: placements,
     stamp: stamp,
+    blockAt: blockAt,
     entitiesFor: entitiesFor,
+    resetCache: resetCache,
     precomputeAround: precomputeAround,
     exportCache: exportCache,
     importCache: importCache,

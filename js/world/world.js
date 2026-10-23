@@ -183,7 +183,7 @@
 
     set(x, y, z, id) {
       if (y < 0 || y >= WORLD_HEIGHT) return;
-      var gen = AllDogs.worldgen.blockAt(x, y, z);
+      var gen = this.generatedAt(x, y, z);
       var cx = Math.floor(x / CHUNK_SIZE);
       var cz = Math.floor(z / CHUNK_SIZE);
       var ckey = cx + ',' + cz;
@@ -203,6 +203,14 @@
         var lz = z - cz * CHUNK_SIZE;
         data[(lx * CHUNK_SIZE + lz) * WORLD_HEIGHT + y] = id;
       }
+    }
+
+    generatedAt(x, y, z) {
+      if (AllDogs.structures) {
+        var s = AllDogs.structures.blockAt(x, y, z);
+        if (s !== null && s !== undefined) return s;
+      }
+      return AllDogs.worldgen.blockAt(x, y, z);
     }
 
     get(x, y, z) {
