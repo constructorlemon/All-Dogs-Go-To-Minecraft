@@ -26,9 +26,6 @@
   var DASH_UP_SPEED = C.DASH_UP_SPEED;
   var DASH_TIME = C.DASH_TIME;
   var JUMP_MIN_HEIGHT = C.JUMP_MIN_HEIGHT;
-  var JUMP_HOLD_HEIGHT = C.JUMP_HOLD_HEIGHT;
-  var JUMP_HOLD_HEIGHT_CROUCH = C.JUMP_HOLD_HEIGHT_CROUCH;
-  var JUMP_CHARGE_SPEED = C.JUMP_CHARGE_SPEED;
   var JUMP_SPRINT_HEIGHT = C.JUMP_SPRINT_HEIGHT;
   var JUMP_BOOST_HEIGHT = C.JUMP_BOOST_HEIGHT;
   var STAMINA_MAX = C.STAMINA_MAX;
@@ -78,9 +75,7 @@ var _fwd = new THREE.Vector3();
       this.exhausted = false;
       this.regenCooldown = 0;
       this.stance = 'walk';
-      this.jumpCharge = 0;
       this.jumpBoost = 0;
-      this.charging = false;
     }
 
     height() {
@@ -104,9 +99,20 @@ var _fwd = new THREE.Vector3();
       this.exhausted = false;
       this.regenCooldown = 0;
       this.stance = 'walk';
-      this.jumpCharge = 0;
       this.jumpBoost = 0;
-      this.charging = false;
+      this.syncCamera(true, 0);
+    }
+
+    syncCamera(immediate, dt) {
+      _euler.set(this.pitch, this.yaw, 0, 'YXZ');
+      this.camera.quaternion.setFromEuler(_euler);
+      var targetEye = POSTURES[this.state].eye;
+      if (immediate) {
+        this.eyeHeight = targetEye;
+      } else {
+        this.eyeHeight += (targetEye - this.eyeHeight) * Math.min(1, (dt || 0) * 12);
+      }
+      this.camera.position.set(this.pos.x, this.pos.y + this.eyeHeight, this.pos.z);
     }
 
     update(dt, input, world) {
@@ -123,11 +129,7 @@ var _fwd = new THREE.Vector3();
 
       this.updatePosture(input, world);
 
-      _euler.set(this.pitch, this.yaw, 0, 'YXZ');
-      this.camera.quaternion.setFromEuler(_euler);
-      var targetEye = POSTURES[this.state].eye;
-      this.eyeHeight += (targetEye - this.eyeHeight) * Math.min(1, dt * 12);
-      this.camera.position.set(this.pos.x, this.pos.y + this.eyeHeight, this.pos.z);
+      this.syncCamera(false, dt);
 
       var sin = Math.sin(this.yaw);
       var cos = Math.cos(this.yaw);
@@ -175,24 +177,18 @@ var _fwd = new THREE.Vector3();
       this.vel.z = _moveDirection.z * speed;
 
       var spaceDown = input.isDown('Space');
+      var spacePressed = input.consumePressed('Space');
       if (spaceDown && this.onGround && !this.exhausted) {
         if (this.state === 'crawl') {
           this.startDash(_moveDirection);
           this.spendStamina(STAMINA_DASH_COST);
-          this.charging = false;
         } else if (this.stance === 'sprint' && moving) {
           this.sprintJump();
-        } else {
-          this.chargeJump(dt);
-          this.charging = true;
+        } else if (spacePressed) {
+          this.normalJump();
         }
       } else if (!spaceDown) {
-        if (this.jumpCharge > 0) this.launchJump();
-        this.jumpCharge = 0;
         this.jumpBoost = 0;
-        this.charging = false;
-      } else {
-        this.charging = false;
       }
 
       var gravity = GRAVITY;
@@ -304,8 +300,6 @@ var _fwd = new THREE.Vector3();
       var cost = mult * STAMINA_JUMP_COST_PER_BLOCK * height;
       this.vel.y = Math.sqrt(2 * GRAVITY * height);
       this.onGround = false;
-      this.jumpCharge = 0;
-      this.charging = false;
       this.spendStamina(cost);
       if (cost > STAMINA_JUMP_COST_BOOST_THRESHOLD) {
         this.regenCooldown = Math.max(this.regenCooldown, STAMINA_REGEN_DELAY * STAMINA_REGEN_DELAY_BOOST);
@@ -313,24 +307,12 @@ var _fwd = new THREE.Vector3();
       this.jumpBoost = this.jumpBoost + 1;
     }
 
-    chargeJump(dt) {
-      var maxH = this.state === 'crouch' ? JUMP_HOLD_HEIGHT_CROUCH : JUMP_HOLD_HEIGHT;
-      var before = this.jumpCharge;
-      this.jumpCharge = Math.min(maxH, this.jumpCharge + JUMP_CHARGE_SPEED * dt);
-      var drained = this.jumpCharge - before;
-      if (drained <= 0) return;
-      this.spendStamina(drained * STAMINA_JUMP_COST_PER_BLOCK);
-      if (this.jumpCharge * STAMINA_JUMP_COST_PER_BLOCK > STAMINA_JUMP_COST_BOOST_THRESHOLD) {
-        this.regenCooldown = Math.max(this.regenCooldown, STAMINA_REGEN_DELAY * STAMINA_REGEN_DELAY_BOOST);
-      }
-    }
-
-    launchJump() {
-      var maxH = this.state === 'crouch' ? JUMP_HOLD_HEIGHT_CROUCH : JUMP_HOLD_HEIGHT;
-      var height = Math.max(JUMP_MIN_HEIGHT, Math.min(this.jumpCharge, maxH));
+    normalJump() {
+      var height = JUMP_MIN_HEIGHT;
       this.vel.y = Math.sqrt(2 * GRAVITY * height);
       this.onGround = false;
-      this.jumpCharge = 0;
+      this.jumpBoost = 0;
+      this.spendStamina(height * STAMINA_JUMP_COST_PER_BLOCK);
     }
 
     moveAxis(axis, dt, world) {

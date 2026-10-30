@@ -165,10 +165,11 @@ this.started = false;
       this.input.onLockChange = function () {
         if (self.input.locked) {
           self.started = true;
+          self.hud.setBaseHint('');
           self.hud.setHint(self.hud.baseHint);
         } else if (!self.inventoryOpen && !self.signEditor.active &&
           !(self.pauseMenu && self.pauseMenu.visible)) {
-          self.hud.setHint('Click to play');
+          self.hud.setHint(self.started ? 'Click to play' : 'Click to start');
         }
       };
 
@@ -1056,7 +1057,8 @@ this.started = false;
 
     start() {
       this.clock = new THREE.Clock();
-      this.hud.setBaseHint('');
+      this.player.syncCamera(true, 0);
+      this.hud.setBaseHint(this.started ? '' : 'Click to start');
       this.refreshUI();
       this.loop();
     }

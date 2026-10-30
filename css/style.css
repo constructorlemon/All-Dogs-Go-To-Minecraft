@@ -206,18 +206,6 @@ body {
   box-shadow: 0 0 6px rgba(224, 64, 63, 0.8);
 }
 
-#stamina.charging {
-  animation: stamina-charge 0.09s linear infinite;
-}
-
-@keyframes stamina-charge {
-  0% { transform: translateX(-50%) translateX(-2px); }
-  25% { transform: translateX(-50%) translateX(2px); }
-  50% { transform: translateX(-50%) translateX(-2px); }
-  75% { transform: translateX(-50%) translateX(2px); }
-  100% { transform: translateX(-50%) translateX(-2px); }
-}
-
 #inventory {
   position: fixed;
   inset: 0;
@@ -589,6 +577,36 @@ body {
 #loading-text {
   font-size: 13px;
   opacity: 0.8;
+}
+
+.loading-chunk-grid {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+
+.loading-chunk-tile {
+  width: 10px;
+  height: 10px;
+  background: #2b241d;
+  border: 1px solid #3b342b;
+}
+
+.loading-chunk-tile-wait {
+  background: #2b241d;
+}
+
+.loading-chunk-tile-active {
+  background: #4a90e2;
+  box-shadow: 0 0 4px rgba(74, 144, 226, 0.8);
+}
+
+.loading-chunk-tile-blue {
+  background: #4a90e2;
+}
+
+.loading-chunk-tile-green {
+  background: #4caf50;
 }
 
 #overlay h1 {

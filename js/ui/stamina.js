@@ -23,8 +23,6 @@
       this.fill.style.background = this.colorFor(f);
       if (player.exhausted) this.root.classList.add('exhausted');
       else this.root.classList.remove('exhausted');
-      if (player.charging) this.root.classList.add('charging');
-      else this.root.classList.remove('charging');
     }
 
     colorFor(f) {
