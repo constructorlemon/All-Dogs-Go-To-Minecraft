@@ -354,6 +354,84 @@
         g.world.set(wsx, wsy, wsz, 0);
         AllDogs.worldSave.apply(g, saveParsed);
         results.push('saveRoundtrip=' + saveBefore + '->' + g.world.get(wsx, wsy, wsz));
+
+        var chestSchema = AllDogs.entitySchemas ? AllDogs.entitySchemas.get('chest') : null;
+        results.push('chestSchema=' + (chestSchema ? 1 : 0));
+        if (chestSchema) {
+          var cwx = Math.floor(g.player.pos.x) + 6.5;
+          var cwz = Math.floor(g.player.pos.z) + 0.5;
+          var cwy = AllDogs.worldgen.heightAt(Math.floor(cwx), Math.floor(cwz)) + 1;
+          var chestEnt = g.entityManager.create('chest', {
+            pos: { x: cwx, y: cwy, z: cwz },
+            yaw: 0
+          });
+          g.entityManager.add(chestEnt);
+          chestEnt.interact(g);
+          results.push('chestOpen=' + (g.panelOpts().mode === 'container' ? 1 : 0));
+          g.inventory.add('dirt', 2);
+          var dirtIdx = g.inventory.indexOf('dirt');
+          var chestMoved = g.activeContainer.handleMove(g, 'inv', dirtIdx, 'chest', 0, 1);
+          results.push('chestMove=' + (chestMoved && g.activeContainer.slots[0]
+            ? g.activeContainer.slots[0].id + ':' + g.activeContainer.slots[0].qty
+            : 'fail'));
+          var chestSaveParsed = AllDogs.worldSave.parse(AllDogs.worldSave.serialize(g));
+          var chestSaved = false;
+          for (var chi = 0; chi < chestSaveParsed.chests.length; chi++) {
+            var chr = chestSaveParsed.chests[chi];
+            if (chr.x === chestEnt.pos.x && chr.y === chestEnt.pos.y && chr.z === chestEnt.pos.z) {
+              chestSaved = !!(chr.slots[0] && chr.slots[0][0] === 'dirt' && chr.slots[0][1] === 1);
+            }
+          }
+          results.push('chestSaved=' + (chestSaved ? 1 : 0));
+          var dirtBefore = 0;
+          for (var dsi = 0; dsi < g.drops.stacks.length; dsi++) {
+            if (g.drops.stacks[dsi].itemId === 'dirt') dirtBefore += g.drops.stacks[dsi].qty;
+          }
+          g.closeContainerUI();
+          chestSchema.onDestroy({ game: g, entity: chestEnt });
+          var dirtAfter = 0;
+          for (var dsj = 0; dsj < g.drops.stacks.length; dsj++) {
+            if (g.drops.stacks[dsj].itemId === 'dirt') dirtAfter += g.drops.stacks[dsj].qty;
+          }
+          results.push('chestDrop=' + (dirtAfter - dirtBefore));
+
+          // Modifier-aware quick-move and zone-aware drag distribution.
+          for (var cini = 0; cini < g.inventory.capacity; cini++) g.inventory.set(cini, null);
+          chestEnt.interact(g);
+          g.inventory.set(0, { id: 'stone', qty: 2 });
+          g.quickMove('inv', 0, true, 'shift');
+          var shiftSlot = g.activeContainer.slots[0];
+          results.push('shiftHotbarToGui=' + (shiftSlot && shiftSlot.id === 'stone' &&
+            shiftSlot.qty === 2 && !g.inventory.get(0) ? 1 : 0));
+
+          g.inventory.set(10, { id: 'sand', qty: 1 });
+          g.quickMove('inv', 10, true, 'ctrl');
+          var ctrlLeftChest = true;
+          for (var csi = 0; csi < g.activeContainer.slots.length; csi++) {
+            var cs = g.activeContainer.slots[csi];
+            if (cs && cs.id === 'sand') ctrlLeftChest = false;
+          }
+          var ctrlHotbar = g.inventory.get(0);
+          results.push('ctrlPrefersInv=' + (ctrlLeftChest && ctrlHotbar &&
+            ctrlHotbar.id === 'sand' ? 1 : 0));
+
+          g.inventory.set(20, { id: 'clay', qty: 4 });
+          var distOk = g.distributeStack(20, 'inv', [
+            { zone: 'chest', slot: 3 },
+            { zone: 'chest', slot: 4 },
+            { zone: 'inv', slot: 25 }
+          ], 'split');
+          var dist3 = g.activeContainer.slots[3];
+          var dist4 = g.activeContainer.slots[4];
+          var dist25 = g.inventory.get(25);
+          results.push('distributeGui=' + (distOk && dist3 && dist3.id === 'clay' &&
+            dist3.qty === 2 && dist4 && dist4.id === 'clay' && dist4.qty === 1 &&
+            dist25 && dist25.id === 'clay' && dist25.qty === 1 ? 1 : 0));
+
+          g.inventoryOpen = false;
+          g.panel.close();
+          g.entityManager.remove(chestEnt);
+        }
       } catch (err) {
         results.push('EXC:' + String(err && err.message ? err.message : err));
       }

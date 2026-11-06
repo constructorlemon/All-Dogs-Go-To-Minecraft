@@ -72,6 +72,15 @@
       lines.push('signtext=' + s.x + ',' + s.y + ',' + s.z + ',' + encodeLines(s.text));
     }
 
+    var chestSchema = AllDogs.entitySchemas ? AllDogs.entitySchemas.get('chest') : null;
+    if (chestSchema && typeof chestSchema.serialize === 'function') {
+      var chests = chestSchema.serialize(game) || [];
+      for (var ci = 0; ci < chests.length; ci++) {
+        var c = chests[ci];
+        lines.push('chest=' + c.x + ',' + c.y + ',' + c.z + ',' + encodeLines(c.slots));
+      }
+    }
+
     return lines.join('\n') + '\n';
   }
 
@@ -84,7 +93,8 @@
       blocks: [],
       placed: [],
       removed: {},
-      signText: {}
+      signText: {},
+      chests: []
     };
     var lines = String(text || '').split(/\r?\n/);
     for (var i = 0; i < lines.length; i++) {
@@ -138,6 +148,14 @@
           };
           data.signText[entityKey('sign', spos.x, spos.y, spos.z)] = spos;
         }
+      } else if (key === 'chest') {
+        var cs = val.split(',');
+        if (cs.length >= 4) {
+          data.chests.push({
+            x: Number(cs[0]), y: Number(cs[1]), z: Number(cs[2]),
+            slots: decodeLines(cs.slice(3).join(','))
+          });
+        }
       }
     }
     return data;
@@ -158,6 +176,10 @@
     var entities = game.entityManager.entities;
     for (var rk in game.entityRemovals) {
       var r = game.entityRemovals[rk];
+      if (r.type === 'chest') {
+        var removedChest = AllDogs.entitySchemas ? AllDogs.entitySchemas.get('chest') : null;
+        if (removedChest && removedChest.forget) removedChest.forget(r.x, r.y, r.z);
+      }
       for (var j = entities.length - 1; j >= 0; j--) {
         var ent = entities[j];
         if (!ent.generated) continue;
@@ -188,6 +210,19 @@
       if (!ne) continue;
       game.entityManager.add(ne);
       if (ne.solidBlock) world.addCollider(ne);
+    }
+
+    var chestRecords = [];
+    var savedChests = data.chests || [];
+    for (var ci = 0; ci < savedChests.length; ci++) {
+      var cr = savedChests[ci];
+      if (!cr) continue;
+      if (game.entityRemovals[entityKey('chest', cr.x, cr.y, cr.z)]) continue;
+      chestRecords.push(cr);
+    }
+    var chestSchema = AllDogs.entitySchemas ? AllDogs.entitySchemas.get('chest') : null;
+    if (chestSchema && typeof chestSchema.load === 'function') {
+      chestSchema.load(game, chestRecords);
     }
 
     for (var ck in affected) {

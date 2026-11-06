@@ -125,7 +125,17 @@
     }
 
     interact(ctx) {
+      var schema = AllDogs.entitySchemas ? AllDogs.entitySchemas.get('chest') : null;
+      if (schema && schema.onInteract) {
+        schema.onInteract({ game: ctx, entity: this });
+        return;
+      }
       this.open = !this.open;
+    }
+
+    onSpawn(manager) {
+      var schema = AllDogs.entitySchemas ? AllDogs.entitySchemas.get('chest') : null;
+      if (schema && schema.onSpawn) schema.onSpawn({ entity: this, manager: manager });
     }
   }
 

@@ -9,7 +9,7 @@ This document describes the systems implemented in the current codebase. It is a
 - `index.html` is the world selector. It creates a new-world or load-world configuration in `sessionStorage` under `adsgtm.world`, then navigates to `game.html`.
 - `game.html` owns the game canvas, loading screen, HUD, hotbar, inventory, and sign editor. `js/main.js` waits for the mod loader, selects the seed, preloads structure placement data, constructs `AllDogs.Game`, applies a save/creative mode, and starts the loop.
 - `testing/__smoke.html` is a standalone autostart harness. It loads the same systems and exposes `window.game` for browser smoke checks.
-- The player camera is positioned at the spawn point as soon as the game is constructed. The world remains paused for player movement until the first canvas click, which enters fullscreen where supported and requests pointer lock. The HUD shows `Click to start` until pointer lock succeeds; losing pointer lock afterward shows `Click to play`.
+- The player camera is positioned at the spawn point as soon as the game is constructed. The world remains paused for player movement until the first canvas click, which enters fullscreen where supported and requests pointer lock. The HUD shows `Click to start` until the first interaction, then clears the prompt.
 
 ### Main loop
 
@@ -104,7 +104,7 @@ The center-screen `BlockRaycaster` intersects rendered chunk meshes up to `REACH
 - Shift or a W double-tap requests sprinting while standing.
 - Ctrl/C hold or C hold crouches. A short tap toggles crouch; a double tap toggles crawl.
 - Crouch and crawl use lower collision heights and slower speeds. Expanding to a taller posture is rejected if the player would overlap terrain.
-- Walking and crouching use an immediate fixed-height jump when Space is pressed.
+- Walking uses an immediate fixed-height jump when Space is pressed. Crouching retains a charge jump: hold Space to build height and release to leap.
 - Sprinting jumps immediately. Holding Space after landing chains sprint jumps and increases the jump boost.
 - Crawling plus Space performs a short directional dash with an upward impulse.
 
@@ -113,8 +113,8 @@ The center-screen `BlockRaycaster` intersects rendered chunk meshes up to `REACH
 - Gravity, terminal fall speed, solid voxel cells, and entity AABBs are applied in the player movement step.
 - The player can step up by `STEP_HEIGHT` (0.5). Crouching/crawling use edge support checks so the player does not casually walk off a ledge.
 - Mod block `onCollide` hooks can run when an overlap is detected.
-- Stamina ranges from 0 to 1. Sprinting drains it; walking and idling regenerate it, with slower regeneration in air and a delay after exertion. Normal jumps, sprint jumps, and dashes also spend stamina.
-- Exhaustion prevents sprint/jump actions until stamina fully recovers. `StaminaBar` displays fill, color thresholds, and exhaustion state.
+- Stamina ranges from 0 to 1. Sprinting drains it; walking and idling regenerate it, with slower regeneration in air and a delay after exertion. Normal jumps, crouch charge jumps, sprint jumps, and dashes also spend stamina. Sprint jumps repeated within six update frames of the previous jump receive a stamina-cost grace period to prevent rapid ceiling-bounce jumps from draining the bar.
+- Exhaustion prevents sprint/jump actions until stamina fully recovers. `StaminaBar` displays fill, color thresholds, charging state, and exhaustion state.
 
 ## 5. Inventory, hotbar, crafting, and smelting
 
@@ -123,8 +123,9 @@ The center-screen `BlockRaycaster` intersects rendered chunk meshes up to `REACH
 - The normal inventory has 36 slots. The first nine are the hotbar; the inventory panel renders the remaining slots while the hotbar stays visible.
 - Stacks have no configured maximum. Adding merges with the first matching item or uses the first empty slot.
 - Number keys and mouse wheel select hotbar items; Q drops one selected item in front of the player.
-- Creative mode replaces normal storage with a catalog of all items that have a placement target, each presented as quantity 999. Creative placement/removal does not consume or grant inventory items.
-- `InventoryPanel` supports full-stack moves, partial moves, stack merging, complete-stack swaps, and drag distribution. Shift distributes a stack evenly over selected inventory squares; Ctrl puts one item in each selected square.
+- Creative mode uses the same inventory, hotbar, crafting, and furnace UI as survival. Entering creative fills the real inventory slots with every item at quantity 999, expanding capacity if a mod adds more items than the normal 36 slots. Creative world placement/removal does not consume or grant inventory items, and furnace outputs can still be collected normally.
+- `InventoryPanel` supports full-stack moves, partial moves, stack merging, complete-stack swaps, and drag distribution. Shift distributes a stack evenly over the selected inventory or open-GUI squares; Ctrl puts one item in each selected square.
+- Shift-click or Ctrl-click quick-moves a whole stack. Shift prefers open crafting/furnace/chest slots: hotbar and main-inventory stacks go to the first accepting GUI slot, falling back to the inventory when none accepts them. Ctrl prefers the inventory: hotbar stacks go to the main inventory and main-inventory stacks go to the hotbar, falling back to the GUI only when the inventory has no room. GUI items always return to the first empty inventory slot. Clicking an empty inventory or hotbar slot while a GUI item exists pulls that GUI stack into the clicked slot.
 
 ### Crafting
 
@@ -145,18 +146,19 @@ The current furnace is a block schema, not an entity. The checked-in `Furnace.js
 - The only active smelting recipe is 1 dirt → 1 clay over 10 seconds.
 - The second visible furnace slot is reserved but is not currently used as fuel.
 - Smelting continues for tracked furnace states while the game loop runs, including when the furnace UI is closed.
+- The furnace UI stacks its two input slots on the left, shows an arrow in the middle, and places the output slot on the right. A gold fill sweeps across the arrow to track the current `furnaceProgress` value.
 - Furnace contents and progress are not included in world saves.
 
 ## 6. Entities and item drops
 
 ### Entity framework
 
-`Entity` is the base type with position, velocity, bounds, mesh synchronization, update/interact hooks, and removal state. `AllDogs.entities` is a type registry; `EntityManager` owns active entities, attaches their meshes, updates them, and performs center-ray AABB selection.
+`Entity` is the base type with position, velocity, bounds, mesh synchronization, update/interact hooks, and removal state. `AllDogs.entities` is a type registry; `EntityManager` owns active entities, attaches their meshes, updates them, and performs center-ray AABB selection. `AllDogs.entitySchemas` is a parallel registry for entity behavior modules loaded from `mods/schema/`.
 
 ### Built-in entities
 
 - **Sign:** a wooden board and post with a canvas-rendered message. Text is limited to four lines and can be edited through the sign editor. The saved position uses the ground coordinate rather than the board’s visual center.
-- **Chest:** a solid collider with a hinged animated lid. Interaction toggles the lid. It is placeable and breakable, but it does not yet provide an item-storage UI or persistent contents.
+- **Chest:** a solid collider with a hinged animated lid. Interaction opens a 27-slot container UI instead of only toggling the lid. Each chest owns a separate inventory keyed by its rounded entity position, so generated and player-placed chests both keep individual contents. Breaking a chest drops every stored stack on the ground. Chest behavior is implemented by the built-in entity schema `mods/schema/Chest.js`.
 - **Generated furniture:** structures create signs and chests as generated entities. They are loaded/unloaded with their origin chunk.
 
 Generated entities are marked separately from player-placed entities. Removing one records a stable type/position key so it stays removed after chunk reloads. Generated sign edits use the same key; player-placed entity records are written directly to saves.
@@ -202,19 +204,22 @@ World saves are downloaded as plain text files named `adsgtm-world-<seed>.txt`. 
 - non-generated block overrides;
 - player-placed entities and their yaw/text;
 - removed generated entity keys;
-- edited generated sign text.
+- edited generated sign text;
+- non-empty chest inventories keyed by chest position.
 
-The parser ignores blank/comment lines and unknown keys. Loading reconstructs the deterministic world from the saved seed, applies block edits, removes generated entities, applies sign edits, recreates placed entities, rebuilds already-loaded affected chunks, restores player orientation/position, and enters creative mode when recorded.
+Chest records use `chest=<x>,<y>,<z>,<encoded slot array>`, where the slot array uses the same URI-encoded JSON approach as sign text. Chest inventories are also tracked for generated chests that are currently outside the loaded chunk range.
 
-The save system intentionally does **not** currently serialize normal inventory, selected item, dropped items, furnace state, chest contents, zone ID, or the structure placement cache. The cache is a separate derived local-storage optimization rather than part of a world save. There is no automatic save; the pause menu’s **Save World** action triggers the browser download.
+The parser ignores blank/comment lines and unknown keys. Loading reconstructs the deterministic world from the saved seed, applies block edits, removes generated entities, applies sign edits, recreates placed entities, restores chest contents, rebuilds already-loaded affected chunks, restores player orientation/position, and enters creative mode when recorded.
+
+The save system intentionally does **not** currently serialize normal inventory, selected item, dropped items, furnace state, zone ID, or the structure placement cache. The cache is a separate derived local-storage optimization rather than part of a world save. There is no automatic save; the pause menu’s **Save World** action triggers the browser download.
 
 ## 9. User interface and game states
 
 - **World selector:** new seed/random seed, creative checkbox, save-file picker, validation messages, controls link, and F3 mod-tools menu.
 - **Loading screen:** structure precomputation progress bar and a tile grid showing waiting, active, processed, and complete cache cells.
-- **Start state:** the player is rendered at the spawn point immediately, while movement remains paused behind the `Click to start` HUD prompt until the first pointer-lock interaction.
+- **Start state:** the player is rendered at the spawn point immediately, while movement remains paused behind the `Click to start` HUD prompt until the first canvas interaction.
 - **HUD:** crosshair, zone label, transient action messages, hotbar, and stamina bar.
-- **Inventory:** modal overlay with crafting or furnace view, item icons, selection, drag/drop, and stack distribution.
+- **Inventory:** modal overlay with crafting, furnace, or chest container view, item icons, selection, drag/drop, and stack distribution. The chest view puts the 27-slot chest grid above the player inventory.
 - **Sign editor:** four-line textarea with Save, Enter-to-save, Escape-to-cancel, and outside-click cancellation.
 - **Pause menu:** M toggles resume, save, instructions, and main-menu actions. Releasing pointer lock prevents the world from responding while the menu is open.
 - **Debug HUD:** F3 shows FPS, position, block/cell, player state, chunk, facing, world dimensions, mesh/render counts, drops, entities, and inventory totals.
@@ -237,18 +242,20 @@ The editor tells the user to put the PNG in `mods/texture` and run `node tools/s
 
 `tools/scanmods.js` scans PNG files, decodes supported 8-bit PNG color types, slices the six atlas faces, and writes `js/mods/manifest.js`. It also lists JSON files in `mods/mobs`, although the current browser loader does not instantiate mob definitions.
 
-`js/mods/modLoader.js` processes the manifest sequentially before game boot. It loads embedded face data or image paths, registers dynamic block IDs/items/textures/icons, and optionally loads `mods/schema/<name>.js`. A schema is exposed through a temporary `module.exports` bridge and can provide:
+`js/mods/modLoader.js` processes the manifest sequentially before game boot. It loads embedded face data or image paths, registers dynamic block IDs/items/textures/icons, and optionally loads `mods/schema/<name>.js`. A schema is exposed through a temporary `module.exports` bridge. A block schema can provide:
 
 - `onClick` for block interaction;
 - `onCollide` for player collision effects;
 - `onPlace` and `onDestroy` hooks;
 - `craftingRecipe` as an extension field (not currently consumed by the built-in crafting resolver).
 
+The loader also registers built-in entity schemas. `Chest.js` is loaded for the `chest` entity type and owns its 27-slot inventories, interaction, quick-move handling, destroy/drop behavior, and save/load helpers. Entity schemas use hooks such as `onSpawn`, `onInteract`, and `onDestroy`. `AllDogs.entitySchemas` is the entity-schema registry, mirroring the block schema registry.
+
 The current checked-in examples include furnace, transparent, and rotated test textures. `mod_meshes.html` is currently only a placeholder page.
 
 ## 11. Testing and diagnostics
 
-`testing/__smoke.html` is the primary executable verification surface. It checks boot/render setup, inventory, mod schema registration, furnace opening and smelting, block interaction, seeded world generation, chunk streaming budgets, greedy mesh rebuilds, structures and orientation, generated furniture, and save/parse/apply round trips. Results are written to a `#smoke-result` element using `data-smoke` and `data-errors` attributes.
+`testing/__smoke.html` is the primary executable verification surface. It checks boot/render setup, inventory, mod schema registration, furnace opening and smelting, chest containers and save round trips, block interaction, seeded world generation, chunk streaming budgets, greedy mesh rebuilds, structures and orientation, generated furniture, and save/parse/apply round trips. Results are written to a `#smoke-result` element using `data-smoke` and `data-errors` attributes.
 
 The in-game F3 overlay is useful for runtime performance and streaming diagnostics. There is no package-managed unit-test suite or build step; the application is run as static files with the browser smoke page and the Node manifest scanner as the main tooling.
 

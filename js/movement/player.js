@@ -26,8 +26,11 @@
   var DASH_UP_SPEED = C.DASH_UP_SPEED;
   var DASH_TIME = C.DASH_TIME;
   var JUMP_MIN_HEIGHT = C.JUMP_MIN_HEIGHT;
+  var JUMP_HOLD_HEIGHT_CROUCH = C.JUMP_HOLD_HEIGHT_CROUCH;
+  var JUMP_CHARGE_SPEED = C.JUMP_CHARGE_SPEED;
   var JUMP_SPRINT_HEIGHT = C.JUMP_SPRINT_HEIGHT;
   var JUMP_BOOST_HEIGHT = C.JUMP_BOOST_HEIGHT;
+  var SPRINT_JUMP_GRACE_FRAMES = C.SPRINT_JUMP_GRACE_FRAMES;
   var STAMINA_MAX = C.STAMINA_MAX;
   var STAMINA_RUN_DRAIN = C.STAMINA_RUN_DRAIN;
   var STAMINA_WALK_REGEN = C.STAMINA_WALK_REGEN;
@@ -75,7 +78,10 @@ var _fwd = new THREE.Vector3();
       this.exhausted = false;
       this.regenCooldown = 0;
       this.stance = 'walk';
+      this.jumpCharge = 0;
       this.jumpBoost = 0;
+      this.charging = false;
+      this.sprintJumpGraceFrames = 0;
     }
 
     height() {
@@ -99,7 +105,10 @@ var _fwd = new THREE.Vector3();
       this.exhausted = false;
       this.regenCooldown = 0;
       this.stance = 'walk';
+      this.jumpCharge = 0;
       this.jumpBoost = 0;
+      this.charging = false;
+      this.sprintJumpGraceFrames = 0;
       this.syncCamera(true, 0);
     }
 
@@ -143,6 +152,8 @@ var _fwd = new THREE.Vector3();
       if (input.isDown('KeyA')) _moveDirection.sub(_right);
 
       if (this.dashRemain > 0) this.dashRemain -= dt;
+      var sprintJumpWithinGrace = this.sprintJumpGraceFrames > 0;
+      if (this.sprintJumpGraceFrames > 0) this.sprintJumpGraceFrames--;
 
       var speed;
       var moving = _moveDirection.lengthSq() > 0;
@@ -182,13 +193,23 @@ var _fwd = new THREE.Vector3();
         if (this.state === 'crawl') {
           this.startDash(_moveDirection);
           this.spendStamina(STAMINA_DASH_COST);
+          this.charging = false;
         } else if (this.stance === 'sprint' && moving) {
-          this.sprintJump();
+          this.sprintJump(sprintJumpWithinGrace);
+        } else if (this.state === 'crouch') {
+          this.chargeJump(dt);
+          this.charging = true;
         } else if (spacePressed) {
           this.normalJump();
         }
       } else if (!spaceDown) {
+        if (this.jumpCharge > 0) this.launchJump();
+        this.jumpCharge = 0;
         this.jumpBoost = 0;
+        this.charging = false;
+        this.sprintJumpGraceFrames = 0;
+      } else {
+        this.charging = false;
       }
 
       var gravity = GRAVITY;
@@ -285,6 +306,7 @@ var _fwd = new THREE.Vector3();
 
     startDash(dir) {
       this.dashRemain = DASH_TIME;
+      this.sprintJumpGraceFrames = 0;
       if (dir && dir.lengthSq() > 0.001) this.dashDir.copy(dir);
       else this.dashDir.copy(_fwd);
       this.dashDir.normalize();
@@ -294,23 +316,54 @@ var _fwd = new THREE.Vector3();
       this.onGround = false;
     }
 
-    sprintJump() {
+    sprintJump(withinGrace) {
       var height = JUMP_SPRINT_HEIGHT + this.jumpBoost * JUMP_BOOST_HEIGHT;
       var mult = STAMINA_SPRINT_JUMP_MULTIPLIER + Math.max(0, this.jumpBoost - 2) * STAMINA_SPRINT_JUMP_RAMP;
       var cost = mult * STAMINA_JUMP_COST_PER_BLOCK * height;
+      if (withinGrace === undefined) withinGrace = this.sprintJumpGraceFrames > 0;
       this.vel.y = Math.sqrt(2 * GRAVITY * height);
       this.onGround = false;
-      this.spendStamina(cost);
-      if (cost > STAMINA_JUMP_COST_BOOST_THRESHOLD) {
-        this.regenCooldown = Math.max(this.regenCooldown, STAMINA_REGEN_DELAY * STAMINA_REGEN_DELAY_BOOST);
+      this.jumpCharge = 0;
+      this.charging = false;
+      if (!withinGrace) {
+        this.spendStamina(cost);
+        if (cost > STAMINA_JUMP_COST_BOOST_THRESHOLD) {
+          this.regenCooldown = Math.max(this.regenCooldown,
+            STAMINA_REGEN_DELAY * STAMINA_REGEN_DELAY_BOOST);
+        }
       }
+      this.sprintJumpGraceFrames = SPRINT_JUMP_GRACE_FRAMES;
       this.jumpBoost = this.jumpBoost + 1;
+    }
+
+    chargeJump(dt) {
+      var before = this.jumpCharge;
+      this.jumpCharge = Math.min(JUMP_HOLD_HEIGHT_CROUCH,
+        this.jumpCharge + JUMP_CHARGE_SPEED * dt);
+      var drained = this.jumpCharge - before;
+      if (drained <= 0) return;
+      this.spendStamina(drained * STAMINA_JUMP_COST_PER_BLOCK);
+      if (this.jumpCharge * STAMINA_JUMP_COST_PER_BLOCK > STAMINA_JUMP_COST_BOOST_THRESHOLD) {
+        this.regenCooldown = Math.max(this.regenCooldown,
+          STAMINA_REGEN_DELAY * STAMINA_REGEN_DELAY_BOOST);
+      }
+    }
+
+    launchJump() {
+      var height = Math.max(JUMP_MIN_HEIGHT,
+        Math.min(this.jumpCharge, JUMP_HOLD_HEIGHT_CROUCH));
+      this.vel.y = Math.sqrt(2 * GRAVITY * height);
+      this.onGround = false;
+      this.jumpCharge = 0;
     }
 
     normalJump() {
       var height = JUMP_MIN_HEIGHT;
       this.vel.y = Math.sqrt(2 * GRAVITY * height);
       this.onGround = false;
+      this.jumpCharge = 0;
+      this.charging = false;
+      this.sprintJumpGraceFrames = 0;
       this.jumpBoost = 0;
       this.spendStamina(height * STAMINA_JUMP_COST_PER_BLOCK);
     }

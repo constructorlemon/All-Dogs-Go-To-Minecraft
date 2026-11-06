@@ -72,4 +72,14 @@
       return ctor ? new ctor(opts) : null;
     }
   };
+
+  AllDogs.entitySchemas = {
+    _types: {},
+    register: function (type, schema) {
+      if (type && schema) AllDogs.entitySchemas._types[type] = schema;
+    },
+    get: function (type) {
+      return AllDogs.entitySchemas._types[type] || null;
+    }
+  };
 })();

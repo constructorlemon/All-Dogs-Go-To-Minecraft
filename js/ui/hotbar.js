@@ -12,6 +12,7 @@
       this.onSelectIndex = null;
       var self = this;
       this.el.addEventListener('click', function (e) {
+        if (e.ctrlKey || e.shiftKey) return;
         var cell = e.target.closest('[data-slot]');
         if (cell && self.onSelectIndex) self.onSelectIndex(+cell.dataset.slot);
       });

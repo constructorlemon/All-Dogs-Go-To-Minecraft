@@ -79,11 +79,11 @@
   }
 
   function furnaceOutputHtml(furnaceOut) {
-    if (!furnaceOut) return '<div class="craft-slot out" data-zone="furnout" data-slot="0"></div>';
+    if (!furnaceOut) return '<div class="craft-slot out furnace-out" data-zone="furnout" data-slot="0"></div>';
     var id = furnaceOut[0];
     var qty = furnaceOut[1];
     var item = ITEMS[id];
-    return '<div class="craft-slot out has" data-zone="furnout" data-slot="0"' +
+    return '<div class="craft-slot out has furnace-out" data-zone="furnout" data-slot="0"' +
       ' data-id="' + id + '" data-qty="' + qty + '">' +
       '<img src="' + AllDogs.iconDataUrl(id) + '" alt="' + item.name + '" draggable="false" />' +
       '<span class="i-count">' + qty + '</span>' +
@@ -92,16 +92,34 @@
   }
 
   function furnaceAreaHtml(furnaceSlots, furnaceOut, progress, selectedId) {
-    var prog = (typeof progress === 'number') ? progress : 0;
+    var prog = (typeof progress === 'number' && isFinite(progress)) ? progress : 0;
+    prog = Math.max(0, Math.min(1, prog));
     return '<div class="inv-title">Furnace</div>' +
       '<div class="craft-area">' +
-      '<div class="craft-stage">' +
+      '<div class="craft-stage furnace-stage">' +
       furnaceSlotHtml(furnaceSlots, 0) +
       furnaceSlotHtml(furnaceSlots, 1) +
       '</div>' +
+      '<div class="furnace-arrow" style="--furnace-progress:' +
+      (prog * 100).toFixed(1) + '%" aria-hidden="true"></div>' +
       furnaceOutputHtml(furnaceOut) +
       '</div>' +
-      '<div class="craft-hint">Arrow: ' + Math.floor(prog * 100) + '% &nbsp; Dirt -> Clay</div>';
+      '<div class="craft-hint">Dirt &rarr; Clay</div>';
+  }
+
+  function containerSlotHtml(zone, slotIndex, slot, selectedId) {
+    if (slot) return cellHtml(zone, slotIndex, slot.id, slot.qty, 'item-card', selectedId);
+    return '<div class="empty-slot" data-zone="' + zone + '" data-slot="' + slotIndex + '"></div>';
+  }
+
+  function containerAreaHtml(title, zone, slots, capacity, selectedId) {
+    var cap = capacity > 0 ? capacity : (slots ? slots.length : 0);
+    var cells = [];
+    for (var i = 0; i < cap; i++) {
+      cells.push(containerSlotHtml(zone, i, slots ? slots[i] : null, selectedId));
+    }
+    return '<div class="inv-title">' + title + '</div>' +
+      '<div class="inv-grid container-grid">' + cells.join('') + '</div>';
   }
   function ghostHtml(id, count) {
     return '<img src="' + AllDogs.iconDataUrl(id) + '" alt="" draggable="false" />' +
@@ -116,16 +134,28 @@
       this.onMove = null;
       this.onCraftOutput = null;
       this.onDistribute = null;
+      this.onQuickMove = null;
       this.draggable = true;
       this.drag = null;
       this.dragMoved = false;
       this.justDragged = false;
       this.ghost = null;
       this.splitTargets = [];
+      this.containerZone = null;
       var self = this;
       this.el.addEventListener('click', function (e) {
         if (self.justDragged) {
           self.justDragged = false;
+          return;
+        }
+        var cell = e.target.closest('[data-slot]');
+        if (cell && (e.ctrlKey || e.shiftKey) && self.onQuickMove) {
+          self.onQuickMove(
+            cell.dataset.zone || 'inv',
+            +cell.dataset.slot,
+            !!cell.dataset.id,
+            e.ctrlKey ? 'ctrl' : 'shift'
+          );
           return;
         }
         var out = e.target.closest('[data-zone="out"]');
@@ -137,7 +167,20 @@
         if (card && self.onSelect) self.onSelect(card.dataset.id);
       });
       this.attachDrag(this.el);
-      if (this.hotbarEl) this.attachDrag(this.hotbarEl);
+      if (this.hotbarEl) {
+        this.attachDrag(this.hotbarEl);
+        this.hotbarEl.addEventListener('click', function (e) {
+          if (!(e.ctrlKey || e.shiftKey) || !self.onQuickMove) return;
+          var cell = e.target.closest('[data-slot]');
+          if (!cell) return;
+          self.onQuickMove(
+            cell.dataset.zone || 'inv',
+            +cell.dataset.slot,
+            !!cell.dataset.id,
+            e.ctrlKey ? 'ctrl' : 'shift'
+          );
+        });
+      }
 
       document.addEventListener('mousemove', function (e) {
         if (!self.drag) return;
@@ -181,7 +224,10 @@
           if (self.onDistribute) {
             var targets = [];
             for (var i = 0; i < self.splitTargets.length; i++) {
-              targets.push(+self.splitTargets[i].dataset.slot);
+              targets.push({
+                zone: self.splitTargets[i].dataset.zone || 'inv',
+                slot: +self.splitTargets[i].dataset.slot
+              });
             }
             self.onDistribute(from, fromZone, targets, e.ctrlKey ? 'one' : 'split');
           }
@@ -213,9 +259,11 @@
       this.splitMode = mode === 'one' ? 'one' : 'split';
       if (cell) {
         var zone = cell.dataset.zone || 'inv';
-        var okZone = zone === 'inv';
+        var idx = +cell.dataset.slot;
+        var okZone = zone === 'inv' || zone === 'in' || zone === 'furn' ||
+          zone === 'chest' || zone === this.containerZone;
         var okType = !(cell.dataset.id && cell.dataset.id !== this.drag.id);
-        var okSource = !(cell.dataset.id && this.drag.zone === 'inv' && +cell.dataset.slot === this.drag.from);
+        var okSource = !(zone === this.drag.zone && idx === this.drag.from);
         var isNew = this.splitTargets.indexOf(cell) === -1;
         if (okZone && okType && okSource && isNew) this.splitTargets.push(cell);
       }
@@ -292,19 +340,16 @@
 
     render(inventory, opts) {
       opts = opts || {};
-      var creative = !!opts.creative;
+      this.containerZone = opts.containerZone || null;
       var selectedId = opts.selectedId;
       var craftInputs = opts.craftInputs || [null, null, null];
-      this.draggable = !creative;
+      this.draggable = true;
 
-      var catalog = inventory.catalog();
-      var title;
-      var gridClass;
+      var title = '';
       var itemsHtml;
       var craftingHtml = '';
-      if (opts && opts.mode === 'furnace') {
-        title = 'Furnace';
-        gridClass = 'inv-grid';
+      var footHint = 'Click an item to select it. Drag to move. Shift-drag splits a stack evenly, Ctrl-drag places 1 per slot (inventory and open GUI slots). Shift-click sends items to GUI first, Ctrl-click keeps them in the inventory. Press E or click outside to close';
+      if (opts.mode === 'furnace') {
         var furnSlots = (opts.furnaceSlots || [null, null]);
         var furnOut = opts.furnaceOut || null;
         var furnProg = (typeof opts.furnaceProgress === 'number') ? opts.furnaceProgress : 0;
@@ -318,19 +363,31 @@
         }
         itemsHtml = fcells.join('');
         craftingHtml = furnaceAreaHtml(furnSlots, furnOut, furnProg, selectedId);
-      } else if (creative && catalog) {
-        title = 'Creative Inventory \u2014 scroll for more blocks';
-        gridClass = 'inv-grid creative-grid';
-        itemsHtml = catalog
-          .map(function (entry, i) {
-            return itemCardHtml(entry.id, entry.qty, i, selectedId);
-          })
-          .join('');
+      } else if (opts.mode === 'container') {
+        var containerSlots = opts.containerSlots || [];
+        var containerCap = opts.containerCapacity > 0 ? opts.containerCapacity : containerSlots.length;
+        craftingHtml = containerAreaHtml(
+          opts.containerTitle || 'Chest',
+          opts.containerZone || 'chest',
+          containerSlots,
+          containerCap,
+          selectedId
+        );
+        footHint = 'Click an item to select it. Drag or Shift-click to move stacks between the chest and your inventory. Ctrl-click keeps inventory items in your inventory. Shift-drag splits across chest and inventory slots. Press E or click outside to close';
+        var cslotCount = inventory.capacity;
+        if (!(cslotCount > 0) || !isFinite(cslotCount)) cslotCount = 36;
+        title = 'Inventory (' + inventory.usedSlots() + '/' + cslotCount + ' slots)';
+        var ccells = [];
+        var cstart = Math.min(HOTBAR_SIZE, cslotCount);
+        for (var ci = cstart; ci < cslotCount; ci++) {
+          var cslot = inventory.get(ci);
+          ccells.push(cslot ? itemCardHtml(cslot.id, cslot.qty, ci, selectedId) : emptySlotHtml(ci));
+        }
+        itemsHtml = ccells.join('');
       } else {
         var slotCount = inventory.capacity;
         if (!(slotCount > 0) || !isFinite(slotCount)) slotCount = 36;
         title = 'Inventory (' + inventory.usedSlots() + '/' + slotCount + ' slots)';
-        gridClass = 'inv-grid';
         var cells = [];
         var start = Math.min(HOTBAR_SIZE, slotCount);
         for (var i = start; i < slotCount; i++) {
@@ -343,10 +400,10 @@
 
       this.el.innerHTML =
         '<div class="inv-window">' +
-        (creative ? '' : craftingHtml) +
-        (creative ? '' : '<div class="inv-title">' + title + '</div>') +
-        '<div class="' + gridClass + '">' + itemsHtml + '</div>' +
-        '<div class="inv-foot">Click an item to select it. Drag to move. Hold Shift and drag to split a stack evenly, Ctrl to place 1 in each square. Press E or click outside to close</div>' +
+        craftingHtml +
+        (title ? '<div class="inv-title">' + title + '</div>' : '') +
+        '<div class="inv-grid">' + itemsHtml + '</div>' +
+        '<div class="inv-foot">' + footHint + '</div>' +
         '</div>';
     }
   }

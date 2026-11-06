@@ -8,6 +8,7 @@
   var WORLD_HEIGHT = C.WORLD_HEIGHT;
   var REACH = C.REACH;
   var PLAYER_HALF_WIDTH = C.PLAYER_HALF_WIDTH;
+  var HOTBAR_SIZE = C.HOTBAR_SIZE || 9;
   var DROP_PICKUP_RADIUS = 1.2;
   var SMELT_TIME = 10;
   var SMELT_RECIPES = { dirt: { id: 'clay', qty: 1 } };
@@ -17,7 +18,6 @@
   var BLOCK = blocks.BLOCK;
   var BLOCK_DEFS = blocks.BLOCK_DEFS;
   var ITEMS = blocks.ITEMS;
-  var orderEntries = blocks.orderEntries;
 
 
   var craftingApi = AllDogs.crafting;
@@ -34,6 +34,7 @@ this.started = false;
       this.craftInputs = [null, null, null];
       this.furnaces = {};
       this.openFurnaceKey = null;
+      this.activeContainer = null;
       this.target = null;
       this.targetEntity = null;
       this.worldMeshes = [];
@@ -89,9 +90,12 @@ this.started = false;
         var ok = self.distributeStack(sourceIdx, sourceZone, targets, mode);
         if (ok) self.refreshUI();
       };
+      this.panel.onQuickMove = function (zone, idx, hasItem, modifier) {
+        self.quickMove(zone, idx, hasItem, modifier);
+      };
       this.hotbar.onSelectIndex = function (idx) { self.selectSlot(idx); };
       this.panel.onSelect = function (id) {
-        if (!self.creative && self.inventory.count(id) < 1) return;
+        if (self.inventory.count(id) < 1) return;
         self.selectedItem = id;
         self.hud.flash('Selected ' + ITEMS[id].name);
         self.refreshUI();
@@ -148,6 +152,9 @@ this.started = false;
         if (!self.input.locked) {
           if (self.inventoryOpen || self.signEditor.active) return;
           if (self.pauseMenu && self.pauseMenu.visible) return;
+          self.started = true;
+          self.hud.setBaseHint('');
+          self.hud.setHint('');
           self.enterFullscreen();
           self.input.requestLock();
           return;
@@ -168,8 +175,8 @@ this.started = false;
           self.hud.setBaseHint('');
           self.hud.setHint(self.hud.baseHint);
         } else if (!self.inventoryOpen && !self.signEditor.active &&
-          !(self.pauseMenu && self.pauseMenu.visible)) {
-          self.hud.setHint(self.started ? 'Click to play' : 'Click to start');
+          !(self.pauseMenu && self.pauseMenu.visible) && !self.started) {
+          self.hud.setHint('Click to start');
         }
       };
 
@@ -217,7 +224,7 @@ this.started = false;
     enterCreative() {
       this.creative = true;
       this.inventory.setCreative();
-      this.hud.flash('Creative mode: all blocks granted');
+      this.hud.flash('Creative mode: all items granted');
       this.refreshUI();
     }
 
@@ -258,6 +265,14 @@ this.started = false;
         selectedId: this.selectedItem,
         craftInputs: this.craftInputs
       };
+      if (this.activeContainer) {
+        opts.mode = 'container';
+        opts.containerTitle = this.activeContainer.title || 'Chest';
+        opts.containerZone = this.activeContainer.zone || 'chest';
+        opts.containerSlots = this.activeContainer.slots || [];
+        opts.containerCapacity = this.activeContainer.capacity || opts.containerSlots.length;
+        return opts;
+      }
       if (this.openFurnaceKey && this.furnaces[this.openFurnaceKey]) {
         var f = this.furnaces[this.openFurnaceKey];
         opts.mode = 'furnace';
@@ -269,9 +284,33 @@ this.started = false;
     }
 
 
+    openContainerUI(container) {
+      if (!container) return;
+      this.closeContainerUI();
+      this.signEditor.close();
+      this.openFurnaceKey = null;
+      this.activeContainer = container;
+      this.inventoryOpen = true;
+      this.hotbar.el.classList.add('inv-open');
+      this.panel.open(this.inventory, this.panelOpts());
+      this.input.releaseLock();
+      if (container.title) this.hud.flash(container.title);
+    }
+
+
+    closeContainerUI() {
+      var container = this.activeContainer;
+      this.activeContainer = null;
+      if (container && typeof container.onClose === 'function') {
+        try { container.onClose(this); } catch (err) {}
+      }
+    }
+
+
     openFurnace(ctx) {
       if (!ctx) return;
       this.signEditor.close();
+      this.closeContainerUI();
       var key = ctx.x + ',' + ctx.y + ',' + ctx.z;
       if (!this.furnaces[key]) {
         this.furnaces[key] = { x: ctx.x, y: ctx.y, z: ctx.z, slots: [null, null], out: null, progress: 0 };
@@ -321,7 +360,6 @@ this.started = false;
       if (!this.openFurnaceKey) return false;
       var f = this.furnaces[this.openFurnaceKey];
       if (!f || !f.out) return false;
-      if (this.creative) { f.out = null; return true; }
       var dst = this.inventory.get(invIdx);
       var n = count === undefined ? f.out.qty : Math.min(count, f.out.qty);
       if (dst && dst.id !== f.out.id) return false;
@@ -400,9 +438,6 @@ this.started = false;
 
 
     selectedSlot() {
-      if (this.creative) {
-        return this.selectedItem ? [this.selectedItem, 999] : null;
-      }
       var idx = this.inventory.indexOf(this.selectedItem);
       if (idx < 0) return null;
       var s = this.inventory.get(idx);
@@ -510,6 +545,7 @@ this.started = false;
     toggleInventory() {
       if (this.inventoryOpen) {
         this.panel.close();
+        this.closeContainerUI();
         this.inventoryOpen = false;
         this.hotbar.el.classList.remove('inv-open');
         this.hud.setHint(this.hud.baseHint);
@@ -525,17 +561,6 @@ this.started = false;
 
 
     cycleSlot(dir) {
-      if (this.creative) {
-        var list = orderEntries(this.inventory.entries());
-        if (list.length === 0) return;
-        var cur = this.selectedItem;
-        var idx = list.findIndex(function (pair) { return pair[0] === cur; });
-        if (idx < 0) idx = 0;
-        var next = (idx + dir + list.length) % list.length;
-        this.selectedItem = list[next][0];
-        this.refreshUI();
-        return;
-      }
       this.hotbarSlot = (this.hotbarSlot + dir + 9) % 9;
       var s = this.inventory.get(this.hotbarSlot);
       this.selectedItem = s ? s.id : null;
@@ -544,12 +569,6 @@ this.started = false;
 
 
     selectSlot(idx) {
-      if (this.creative) {
-        var list = orderEntries(this.inventory.entries());
-        if (list[idx]) this.selectedItem = list[idx][0];
-        this.refreshUI();
-        return;
-      }
       if (idx < 0 || idx >= 9) return;
       this.hotbarSlot = idx;
       var s = this.inventory.get(idx);
@@ -629,6 +648,17 @@ this.started = false;
       if (this.targetEntity) {
         var ent = this.targetEntity;
         var itemId = ent.itemId || null;
+        if (this.activeContainer && this.activeContainer.entity === ent) {
+          this.closeContainerUI();
+          this.panel.close();
+          this.inventoryOpen = false;
+          this.hotbar.el.classList.remove('inv-open');
+          if (!this.input.locked) this.input.requestLock();
+        }
+        var schema = AllDogs.entitySchemas ? AllDogs.entitySchemas.get(ent.type) : null;
+        if (schema && schema.onDestroy) {
+          try { schema.onDestroy({ game: this, entity: ent }); } catch (err) {}
+        }
         if (ent.generated) {
           var ep = this.entitySavePos(ent);
           this.entityRemovals[this.entityKeyOf(ent.type, ep.x, ep.y, ep.z)] = {
@@ -883,7 +913,170 @@ this.started = false;
     }
 
 
+    firstEmptySlot(start, end) {
+      var cap = this.inventory.capacity;
+      if (end === undefined || end > cap) end = cap;
+      for (var i = start; i < end; i++) {
+        if (!this.inventory.get(i)) return i;
+      }
+      return -1;
+    }
+
+
+    zoneSlots(zone) {
+      if (zone === 'in') return this.craftInputs;
+      if (zone === 'furn') return this.furnaceContainer();
+      if (this.activeContainer) {
+        var activeZone = this.activeContainer.zone || 'chest';
+        if (zone === activeZone) return this.activeContainer.slots || null;
+      }
+      return null;
+    }
+
+
+    zoneCapacity(zone) {
+      if (zone === 'inv') return this.inventory.capacity;
+      var slots = this.zoneSlots(zone);
+      return slots ? slots.length : 0;
+    }
+
+
+    getZoneSlot(zone, idx) {
+      if (zone === 'inv') return this.inventory.get(idx);
+      var slots = this.zoneSlots(zone);
+      if (!slots || idx < 0 || idx >= slots.length) return null;
+      return slots[idx] || null;
+    }
+
+
+    setZoneSlot(zone, idx, slot) {
+      if (zone === 'inv') {
+        this.inventory.set(idx, slot);
+        return;
+      }
+      var slots = this.zoneSlots(zone);
+      if (slots && idx >= 0 && idx < slots.length) slots[idx] = slot;
+    }
+
+
+    placeInvIntoGui(invIdx, gui, guiIdx, count) {
+      if (!gui) return false;
+      if (gui.kind === 'craft') return this.placeIntoCraft(guiIdx, invIdx, count);
+      return this.moveInvToContainer(invIdx, gui.slots, guiIdx, count);
+    }
+
+
+    guiInputContainer() {
+      if (!this.inventoryOpen) return null;
+      if (this.openFurnaceKey && this.furnaces[this.openFurnaceKey]) {
+        return { kind: 'furn', slots: this.furnaces[this.openFurnaceKey].slots };
+      }
+      return { kind: 'craft', slots: this.craftInputs };
+    }
+
+
+    firstGuiInput(container, itemId) {
+      if (!container) return -1;
+      for (var i = 0; i < container.slots.length; i++) {
+        var slot = container.slots[i];
+        if (!slot || slot.id === itemId) return i;
+      }
+      return -1;
+    }
+
+
+    quickMoveSlot(container, fromIdx, toIdx) {
+      if (!container) return false;
+      if (container.kind === 'craft') return this.returnCraft(fromIdx, toIdx);
+      return this.moveContainerToInv(container.slots, fromIdx, toIdx);
+    }
+
+
+    quickMove(zone, idx, hasItem, modifier) {
+      if (this.activeContainer && this.activeContainer.quickMove) {
+        var containerMoved = this.activeContainer.quickMove(this, zone, idx, hasItem, modifier);
+        if (containerMoved) this.refreshUI();
+        return containerMoved;
+      }
+      if (!hasItem) {
+        if (zone !== 'inv' || this.inventory.get(idx)) return false;
+        var gui = this.guiInputContainer();
+        if (!gui) return false;
+        var srcIdx = -1;
+        for (var i = 0; i < gui.slots.length; i++) {
+          if (gui.slots[i]) { srcIdx = i; break; }
+        }
+        if (srcIdx < 0) return false;
+        var pulled = this.quickMoveSlot(gui, srcIdx, idx);
+        if (pulled) this.refreshUI();
+        return pulled;
+      }
+
+      if (zone === 'out') return this.takeCraftOutput();
+
+      if (zone === 'furnout') {
+        var outTarget = this.firstEmptySlot(HOTBAR_SIZE);
+        if (outTarget < 0) outTarget = this.firstEmptySlot(0, HOTBAR_SIZE);
+        if (outTarget < 0) return false;
+        var took = this.takeFurnaceOutput(outTarget);
+        if (took) this.refreshUI();
+        return took;
+      }
+
+      if (zone === 'in' || zone === 'furn') {
+        var invTarget = this.firstEmptySlot(HOTBAR_SIZE);
+        if (invTarget < 0) invTarget = this.firstEmptySlot(0, HOTBAR_SIZE);
+        if (invTarget < 0) return false;
+        var returned = zone === 'in'
+          ? this.returnCraft(idx, invTarget)
+          : this.moveContainerToInv(this.furnaceContainer(), idx, invTarget);
+        if (returned) this.refreshUI();
+        return returned;
+      }
+
+      if (zone !== 'inv') return false;
+      var src = this.inventory.get(idx);
+      if (!src) return false;
+
+      var preferGui = modifier !== 'ctrl';
+      var openGui = this.guiInputContainer();
+
+      if (preferGui && openGui) {
+        var guiIdx = this.firstGuiInput(openGui, src.id);
+        if (guiIdx >= 0 && this.placeInvIntoGui(idx, openGui, guiIdx)) {
+          this.refreshUI();
+          return true;
+        }
+      }
+
+      var invTarget2 = idx < HOTBAR_SIZE
+        ? this.firstEmptySlot(HOTBAR_SIZE)
+        : this.firstEmptySlot(0, HOTBAR_SIZE);
+      if (invTarget2 >= 0 && this.inventory.move(idx, invTarget2)) {
+        this.refreshUI();
+        return true;
+      }
+
+      if (!preferGui && openGui) {
+        var guiFallback = this.firstGuiInput(openGui, src.id);
+        if (guiFallback >= 0 && this.placeInvIntoGui(idx, openGui, guiFallback)) {
+          this.refreshUI();
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+
     handleItemMove(fromIdx, fromZone, toIdx, toZone, count) {
+      if (this.activeContainer && this.activeContainer.handleMove) {
+        var containerOk = this.activeContainer.handleMove(
+          this, fromZone, fromIdx, toZone, toIdx, count
+        );
+        if (containerOk) this.refreshUI();
+        return containerOk;
+      }
       if (fromZone === 'out') {
         if (toZone === 'inv') return this.takeCraftOutput();
         return false;
@@ -976,33 +1169,45 @@ this.started = false;
 
 
     distributeStack(sourceIdx, sourceZone, targets, mode) {
-      var src = sourceZone === 'in' ? this.craftInputs[sourceIdx] : this.inventory.get(sourceIdx);
+      var src = this.getZoneSlot(sourceZone, sourceIdx);
       if (!src || !targets || targets.length === 0) return false;
+
+      var list = [];
+      var seen = Object.create(null);
+      for (var t = 0; t < targets.length; t++) {
+        var target = targets[t];
+        if (!target) continue;
+        var zone = typeof target === 'object' ? (target.zone || 'inv') : 'inv';
+        var idx = typeof target === 'object' ? target.slot : target;
+        if (zone === sourceZone && idx === sourceIdx) continue;
+        var cap = this.zoneCapacity(zone);
+        if (idx < 0 || idx >= cap) continue;
+        var key = zone + ':' + idx;
+        if (seen[key]) continue;
+        seen[key] = true;
+        var dest = this.getZoneSlot(zone, idx);
+        if (dest && dest.id !== src.id) continue;
+        list.push({ zone: zone, idx: idx, dest: dest });
+      }
+
       var n = src.qty;
-      var K = targets.length;
+      var K = list.length;
+      if (K === 0) return false;
       var one = mode === 'one';
       var base = one ? 0 : Math.floor(n / K);
       var rem = one ? 0 : n - base * K;
       var placed = 0;
-      for (var i = 0; i < K && placed < n; i++) {
-        var idx = targets[i];
-        if (idx < 0 || idx >= this.inventory.capacity) continue;
-        var share = one ? 1 : (base + (i < rem ? 1 : 0));
+      for (var i = 0; i < K; i++) {
+        var share = one ? (i < n ? 1 : 0) : (base + (i < rem ? 1 : 0));
         if (share <= 0) continue;
-        var dest = this.inventory.get(idx);
-        if (dest && dest.id !== src.id) continue;
-        if (dest) dest.qty += share;
-        else this.inventory.set(idx, { id: src.id, qty: share });
+        var entry = list[i];
+        if (entry.dest) entry.dest.qty += share;
+        else this.setZoneSlot(entry.zone, entry.idx, { id: src.id, qty: share });
         placed += share;
       }
       if (placed > 0) {
-        if (sourceZone === 'in') {
-          if (placed >= src.qty) this.craftInputs[sourceIdx] = null;
-          else src.qty -= placed;
-        } else {
-          if (placed >= src.qty) this.inventory.set(sourceIdx, null);
-          else src.qty -= placed;
-        }
+        if (placed >= n) this.setZoneSlot(sourceZone, sourceIdx, null);
+        else src.qty -= placed;
       }
       return placed > 0;
     }

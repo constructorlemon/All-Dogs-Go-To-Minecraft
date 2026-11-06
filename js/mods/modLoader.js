@@ -4,6 +4,13 @@
 
   var S = 16;
   var PITCH = 18;
+  var BASE = '';
+  try {
+    var current = document.currentScript;
+    if (current && current.src) {
+      BASE = current.src.split('?')[0].replace(/js\/mods\/modLoader\.js$/, '');
+    }
+  } catch (err) {}
 
   function canvas16() {
     var c = document.createElement('canvas');
@@ -57,24 +64,37 @@
     return { key: key, name: name };
   }
 
-  function loadSchema(name, key) {
+  function loadSchemaModule(name) {
     return new Promise(function (resolve) {
-      if (!name) { resolve(false); return; }
+      if (!name) { resolve(null); return; }
       var prev = window.module;
       window.module = { exports: {} };
       var script = document.createElement('script');
-      script.src = 'mods/schema/' + encodeURI(name) + '.js';
+      script.src = BASE + 'mods/schema/' + encodeURI(name) + '.js';
       script.onload = function () {
         var schema = window.module ? window.module.exports : null;
         window.module = prev;
-        if (schema && AllDogs.blocks.attachSchema) AllDogs.blocks.attachSchema(key, schema);
-        resolve(!!schema);
+        resolve(schema || null);
       };
       script.onerror = function () {
         window.module = prev;
-        resolve(false);
+        resolve(null);
       };
       document.head.appendChild(script);
+    });
+  }
+
+  function loadSchema(name, key) {
+    return loadSchemaModule(name).then(function (schema) {
+      if (schema && AllDogs.blocks.attachSchema) AllDogs.blocks.attachSchema(key, schema);
+      return !!schema;
+    });
+  }
+
+  function loadEntitySchema(name, type) {
+    return loadSchemaModule(name).then(function (schema) {
+      if (schema && AllDogs.entitySchemas) AllDogs.entitySchemas.register(type, schema);
+      return !!schema;
     });
   }
 
@@ -89,6 +109,10 @@
       return registerEntry(entry, sliceFromImage(img));
     });
   }
+
+  var BUILTIN_ENTITY_SCHEMAS = [
+    { type: 'chest', name: 'Chest' }
+  ];
 
   function ModLoader() {
     var self = this;
@@ -121,6 +145,16 @@
           };
         })(manifest.textures[i]));
       }
+    }
+    for (var s = 0; s < BUILTIN_ENTITY_SCHEMAS.length; s++) {
+      chain = chain.then((function (entry) {
+        return function () {
+          return loadEntitySchema(entry.name, entry.type).catch(function () {
+            self.failed++;
+            return false;
+          });
+        };
+      })(BUILTIN_ENTITY_SCHEMAS[s]));
     }
     return chain;
   };

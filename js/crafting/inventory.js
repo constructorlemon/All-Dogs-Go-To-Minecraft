@@ -3,6 +3,7 @@
   var AllDogs = (window.AllDogs = window.AllDogs || {});
 
   var DEFAULT_CAPACITY = 36;
+  var CREATIVE_STACK = 999;
 
   class Inventory {
     constructor(options) {
@@ -15,7 +16,6 @@
       }
       this.slots = new Array(this.capacity).fill(null);
       this.creative = false;
-      this._catalog = null;
       if (init) {
         for (var id in init) this.add(id, init[id]);
       }
@@ -23,17 +23,23 @@
 
     setCreative() {
       this.creative = true;
-      var ITEMS = AllDogs.blocks.ITEMS;
-      var catalog = [];
-      for (var id in ITEMS) {
-        var it = ITEMS[id];
-        if (it && it.place != null) catalog.push({ id: id, qty: 999 });
+      var blocks = AllDogs.blocks;
+      var ITEMS = blocks.ITEMS;
+      var order = blocks.ITEM_ORDER || [];
+      var ids = [];
+      var seen = Object.create(null);
+      function push(id) {
+        if (!ITEMS[id] || seen[id]) return;
+        seen[id] = true;
+        ids.push(id);
       }
-      this._catalog = catalog;
-    }
-
-    catalog() {
-      return this.creative ? this._catalog : null;
+      for (var i = 0; i < order.length; i++) push(order[i]);
+      for (var id in ITEMS) push(id);
+      this.capacity = Math.max(this.capacity, ids.length);
+      this.slots = new Array(this.capacity).fill(null);
+      for (var j = 0; j < ids.length; j++) {
+        this.slots[j] = { id: ids[j], qty: CREATIVE_STACK };
+      }
     }
 
     indexOf(itemId) {
@@ -53,7 +59,6 @@
 
     add(itemId, qty) {
       if (qty === undefined) qty = 1;
-      if (this.creative) return true;
       var i = this.indexOf(itemId);
       if (i < 0) i = this.findEmpty();
       if (i < 0) return false;
@@ -78,12 +83,6 @@
     }
 
     count(itemId) {
-      if (this.creative && this._catalog) {
-        for (var i = 0; i < this._catalog.length; i++) {
-          if (this._catalog[i].id === itemId) return this._catalog[i].qty;
-        }
-        return 0;
-      }
       var total = 0;
       for (var i = 0; i < this.slots.length; i++) {
         var s = this.slots[i];
@@ -98,9 +97,6 @@
     }
 
     entries() {
-      if (this.creative && this._catalog) {
-        return this._catalog.map(function (c) { return [c.id, c.qty]; });
-      }
       var out = [];
       for (var i = 0; i < this.slots.length; i++) {
         var s = this.slots[i];
@@ -110,7 +106,6 @@
     }
 
     usedSlots() {
-      if (this.creative && this._catalog) return this._catalog.length;
       var used = 0;
       for (var i = 0; i < this.slots.length; i++) {
         if (this.slots[i]) used++;

@@ -206,6 +206,18 @@ body {
   box-shadow: 0 0 6px rgba(224, 64, 63, 0.8);
 }
 
+#stamina.charging {
+  animation: stamina-charge 0.09s linear infinite;
+}
+
+@keyframes stamina-charge {
+  0% { transform: translateX(-50%) translateX(-2px); }
+  25% { transform: translateX(-50%) translateX(2px); }
+  50% { transform: translateX(-50%) translateX(-2px); }
+  75% { transform: translateX(-50%) translateX(2px); }
+  100% { transform: translateX(-50%) translateX(-2px); }
+}
+
 #inventory {
   position: fixed;
   inset: 0;
@@ -322,15 +334,19 @@ body {
   gap: 6px;
 }
 
-.inv-grid.creative-grid {
-  max-height: 72vh;
-  overflow-y: auto;
-}
-
 .inv-grid > .item-card,
 .inv-grid > .empty-slot {
   min-height: 70px;
   width: 100%;
+}
+
+.inv-grid.container-grid {
+  margin-bottom: 14px;
+}
+
+.inv-grid.container-grid > .item-card,
+.inv-grid.container-grid > .empty-slot {
+  min-height: 56px;
 }
 
 .item-card {
@@ -419,6 +435,25 @@ body {
   transform: translateX(-50%);
 }
 
+.furnace-stage {
+  width: 66px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.furnace-stage .craft-slot.furn {
+  position: static;
+  transform: none;
+}
+
+.craft-slot.out.furnace-out {
+  position: relative;
+  flex: none;
+}
+
 .craft-slot.out {
   background: #7a7a7a;
   cursor: pointer;
@@ -447,6 +482,40 @@ body {
   font-size: 10px;
   text-align: center;
   line-height: 1.1;
+}
+
+.furnace-arrow {
+  position: relative;
+  flex: none;
+  width: 86px;
+  height: 44px;
+  filter:
+    drop-shadow(1px 0 0 #2f2f2f)
+    drop-shadow(-1px 0 0 #2f2f2f)
+    drop-shadow(0 1px 0 #2f2f2f)
+    drop-shadow(0 -1px 0 #2f2f2f);
+}
+
+.furnace-arrow::before,
+.furnace-arrow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(0% 34%, 50% 34%, 50% 0%, 100% 50%, 50% 100%, 50% 66%, 0% 66%);
+}
+
+.furnace-arrow::before {
+  background: #5a5a5a;
+}
+
+.furnace-arrow::after {
+  background: linear-gradient(
+    to right,
+    #f0b23c 0,
+    #f0b23c var(--furnace-progress, 0%),
+    rgba(240, 178, 60, 0) var(--furnace-progress, 0%),
+    rgba(240, 178, 60, 0) 100%
+  );
 }
 
 .craft-hint {
