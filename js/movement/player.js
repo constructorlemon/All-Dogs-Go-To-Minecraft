@@ -12,6 +12,7 @@
   var PLAYER_HEIGHT = C.PLAYER_HEIGHT;
   var PLAYER_EYE = C.PLAYER_EYE;
   var PLAYER_HALF_WIDTH = C.PLAYER_HALF_WIDTH;
+  var PLAYER_MASS = C.PLAYER_MASS || 4;
   var MOUSE_SENSITIVITY = C.MOUSE_SENSITIVITY;
   var MAX_PITCH = C.MAX_PITCH;
   var CROUCH_HEIGHT = C.CROUCH_HEIGHT;
@@ -62,6 +63,7 @@ var _fwd = new THREE.Vector3();
       this.camera = camera;
       this.pos = new THREE.Vector3();
       this.vel = new THREE.Vector3();
+      this.mass = PLAYER_MASS;
       this.yaw = Math.PI;
       this.pitch = 0;
       this.onGround = false;
@@ -86,6 +88,17 @@ var _fwd = new THREE.Vector3();
 
     height() {
       return POSTURES[this.state].height;
+    }
+
+    // Feet-based bounds, matching MobEntity. Collision code can treat the
+    // player and mobs as the same kind of dynamic body.
+    get bounds() {
+      var hw = PLAYER_HALF_WIDTH;
+      var h = this.height();
+      return {
+        min: { x: this.pos.x - hw, y: this.pos.y, z: this.pos.z - hw },
+        max: { x: this.pos.x + hw, y: this.pos.y + h, z: this.pos.z + hw }
+      };
     }
 
     spawn(x, y, z) {
@@ -471,24 +484,30 @@ var _fwd = new THREE.Vector3();
     }
 
     _overlapsCore(world) {
-      var x0 = Math.floor(this.pos.x - PLAYER_HALF_WIDTH);
-      var x1 = Math.floor(this.pos.x + PLAYER_HALF_WIDTH);
-      var y0 = Math.floor(this.pos.y);
-      var y1 = Math.floor(this.pos.y + this.height() - 0.001);
-      var z0 = Math.floor(this.pos.z - PLAYER_HALF_WIDTH);
-      var z1 = Math.floor(this.pos.z + PLAYER_HALF_WIDTH);
-      for (var y = y0; y <= y1; y++) {
-        for (var x = x0; x <= x1; x++) {
-          for (var z = z0; z <= z1; z++) {
-            if (world.isSolid(x, y, z)) return true;
+      return this.overlapsAt(world, this.pos.x, this.pos.y, this.pos.z);
+    }
+
+    // Pure overlap test at an arbitrary feet position. Used by movement and by
+    // the shared mob/player collision solver before it applies any correction.
+    overlapsAt(world, x, y, z) {
+      var x0 = Math.floor(x - PLAYER_HALF_WIDTH);
+      var x1 = Math.floor(x + PLAYER_HALF_WIDTH);
+      var y0 = Math.floor(y);
+      var y1 = Math.floor(y + this.height() - 0.001);
+      var z0 = Math.floor(z - PLAYER_HALF_WIDTH);
+      var z1 = Math.floor(z + PLAYER_HALF_WIDTH);
+      for (var yy = y0; yy <= y1; yy++) {
+        for (var xx = x0; xx <= x1; xx++) {
+          for (var zz = z0; zz <= z1; zz++) {
+            if (world.isSolid(xx, yy, zz)) return true;
           }
         }
       }
       if (world.collidesAABB(
-        this.pos.x - PLAYER_HALF_WIDTH, this.pos.y,
-        this.pos.z - PLAYER_HALF_WIDTH,
-        this.pos.x + PLAYER_HALF_WIDTH, this.pos.y + this.height(),
-        this.pos.z + PLAYER_HALF_WIDTH
+        x - PLAYER_HALF_WIDTH, y,
+        z - PLAYER_HALF_WIDTH,
+        x + PLAYER_HALF_WIDTH, y + this.height(),
+        z + PLAYER_HALF_WIDTH
       )) return true;
       return false;
     }

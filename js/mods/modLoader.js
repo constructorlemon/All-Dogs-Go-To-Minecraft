@@ -111,7 +111,8 @@
   }
 
   var BUILTIN_ENTITY_SCHEMAS = [
-    { type: 'chest', name: 'Chest' }
+    { type: 'chest', name: 'Chest' },
+    { type: 'zombie', name: 'Zombie' }
   ];
 
   function ModLoader() {

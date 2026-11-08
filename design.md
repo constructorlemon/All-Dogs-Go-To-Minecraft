@@ -20,7 +20,7 @@ This document describes the systems implemented in the current codebase. It is a
 3. Streams/rebuilds nearby chunks within a time and chunk-count budget.
 4. Updates and expires item drops.
 5. Updates the debug HUD when visible.
-6. While pointer locked and the inventory is closed, updates the player, entities, target raycasts, and drop pickup.
+6. While pointer locked and the inventory is closed, updates the player, runs the global pathfinding scheduler, updates entities, resolves player/mob rigid-body overlap, target raycasts, and drop pickup.
 7. Updates the stamina HUD and renders the Three.js scene.
 
 ## 2. World model and terrain generation
@@ -155,10 +155,19 @@ The current furnace is a block schema, not an entity. The checked-in `Furnace.js
 
 `Entity` is the base type with position, velocity, bounds, mesh synchronization, update/interact hooks, and removal state. `AllDogs.entities` is a type registry; `EntityManager` owns active entities, attaches their meshes, updates them, and performs center-ray AABB selection. `AllDogs.entitySchemas` is a parallel registry for entity behavior modules loaded from `mods/schema/`.
 
+### Mobs and pathfinding
+
+`MobEntity` (`js/entity/mob.js`) is the moving-creature base class. It stores health, speed, gravity, jump height, stop distance, and a feet-based position, with a bounds getter that spans the full body. Movement uses per-axis AABB collision against solid voxels and entity colliders, gravity with a terminal fall speed, automatic jumping when horizontally blocked or when the next path node is higher, and mesh synchronization offset to the body center. Path following string-pulls the route: it looks a few nodes ahead and steers at the furthest one reachable by a straight walkable line, so mobs cross the cell grid smoothly instead of stair-stepping and zig-zagging. Line-of-sight sampling is throttled and cached per mob to keep a large horde cheap; a visible target within short range is chased directly, and the stop distance prevents the final approach from jittering back and forth. Schema hooks (`mob`, `buildMesh`, `target`, `tick`, `onHurt`, `onDeath`, `onInteract`, `onSpawn`, `onRemoved`) let a schema drive appearance, targeting, and behavior while sharing all physical logic. `damage()` applies damage and removes the mob at zero health; the manager then detaches its mesh.
+
+`AllDogs.pathfinder` (`js/entity/pathfinder.js`) provides bounded A* over the voxel grid. Searches are capped by node count (default 300), horizontal radius (20 blocks), drop height (4 blocks), and a goal radius; a binary heap, numeric node keys, and 8-direction movement with corner checks keep them small. If the budget is exhausted before the goal, the best frontier node becomes a partial path. A global scheduler runs searches with a roughly 3 ms per-frame budget and at most 16 searches per frame, keeps at most one queued request per mob, staggers repath intervals by distance, and rejects new requests once 256 are pending so 1000 mobs cannot grow the queue without bound. Mobs fall back to direct pursuit while their path is queued or when the queue is saturated.
+
+`AllDogs.mobCollision` (`js/entity/mobCollision.js`) adds simple rigid-body separation between the player and every living mob. Both use feet-based bounds and an inverse mass; the player has mass 4 and mobs default to mass 1, so mobs yield more when bodies overlap. A uniform XZ spatial hash collects nearby pairs, then up to three Gauss-Seidel passes resolve each pair along the horizontal axis with the smallest overlap. A per-frame resolution budget rotates through pairs when a dense horde produces too many contacts, so collision work cannot stall a frame. Positional correction is split by inverse mass, a small slop prevents jitter, and an inelastic impulse cancels closing velocity. Every correction is tested against solid voxels and static entity colliders first, with axis-only fallbacks so bodies slide along walls instead of being pushed through them. Moved mob meshes and the player camera are re-synchronized after resolution.
+
 ### Built-in entities
 
 - **Sign:** a wooden board and post with a canvas-rendered message. Text is limited to four lines and can be edited through the sign editor. The saved position uses the ground coordinate rather than the board’s visual center.
 - **Chest:** a solid collider with a hinged animated lid. Interaction opens a 27-slot container UI instead of only toggling the lid. Each chest owns a separate inventory keyed by its rounded entity position, so generated and player-placed chests both keep individual contents. Breaking a chest drops every stored stack on the ground. Chest behavior is implemented by the built-in entity schema `mods/schema/Chest.js`.
+- **Zombie:** a 2-block-tall dark green rectangular prism that targets the player and follows smoothed A* paths toward them, switching to a direct line when the player is visible. It jumps automatically when blocked or when the next node is higher, stops at melee distance, has 20 health, and is implemented by the built-in entity schema `mods/schema/Zombie.js`.
 - **Generated furniture:** structures create signs and chests as generated entities. They are loaded/unloaded with their origin chunk.
 
 Generated entities are marked separately from player-placed entities. Removing one records a stable type/position key so it stays removed after chunk reloads. Generated sign edits use the same key; player-placed entity records are written directly to saves.
@@ -180,7 +189,7 @@ Generated entities are marked separately from player-placed entities. Removing o
 
 `Zone` defines the extension hooks for spawn, generation, entities, enter/update/leave behavior, and exit permissions. `ZoneManager` registers zones and, on entry, clears the world, calls zone generation, and activates the zone.
 
-Only `TestingZone` is currently registered. It uses seeded terrain for a spawn point and places a welcome sign and chest near the spawn. The framework is ready for additional zones, but there is no zone transition UI or portal system yet.
+Only `TestingZone` is currently registered. It uses seeded terrain for a spawn point and places a welcome sign, a chest, and three test zombies near the spawn. The framework is ready for additional zones, but there is no zone transition UI or portal system yet.
 
 ### Deterministic structures
 
@@ -255,7 +264,7 @@ The current checked-in examples include furnace, transparent, and rotated test t
 
 ## 11. Testing and diagnostics
 
-`testing/__smoke.html` is the primary executable verification surface. It checks boot/render setup, inventory, mod schema registration, furnace opening and smelting, chest containers and save round trips, block interaction, seeded world generation, chunk streaming budgets, greedy mesh rebuilds, structures and orientation, generated furniture, and save/parse/apply round trips. Results are written to a `#smoke-result` element using `data-smoke` and `data-errors` attributes.
+`testing/__smoke.html` is the primary executable verification surface. It checks boot/render setup, inventory, mod schema registration, furnace opening and smelting, chest containers and save round trips, block interaction, seeded world generation, chunk streaming budgets, greedy mesh rebuilds, structures and orientation, generated furniture, save/parse/apply round trips, zombie schema registration, test-zombie spawning, A* path production, mob movement, and player/mob rigid-body separation. Results are written to a `#smoke-result` element using `data-smoke` and `data-errors` attributes.
 
 The in-game F3 overlay is useful for runtime performance and streaming diagnostics. There is no package-managed unit-test suite or build step; the application is run as static files with the browser smoke page and the Node manifest scanner as the main tooling.
 
@@ -270,6 +279,7 @@ The in-game F3 overlay is useful for runtime performance and streaming diagnosti
 | Structures and zones | `js/world/structures/*`, `js/zones/*` |
 | Items and crafting | `js/crafting/*`, `js/world/drops.js` |
 | Entities | `js/entity/*` |
+| Mobs and pathfinding | `js/entity/mob.js`, `js/entity/mobCollision.js`, `js/entity/pathfinder.js`, `mods/schema/Zombie.js` |
 | Saves | `js/world/worldSave.js` |
 | HUD and menus | `js/ui/*`, `css/style.css`, `controls.html` |
 | Mods | `mod_textures.html`, `mod_meshes.html`, `js/mod/*`, `js/mods/*`, `tools/scanmods.js`, `mods/*` |

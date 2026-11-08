@@ -52,6 +52,9 @@
   <script src="../js/world/worldSave.js"></script>
   <script src="../js/world/drops.js"></script>
   <script src="../js/entity/entity.js"></script>
+  <script src="../js/entity/pathfinder.js"></script>
+  <script src="../js/entity/mob.js"></script>
+  <script src="../js/entity/mobCollision.js"></script>
   <script src="../js/entity/sign.js"></script>
   <script src="../js/entity/chest.js"></script>
   <script src="../js/entity/entityManager.js"></script>
@@ -83,6 +86,10 @@
   (function () {
     var errors = [];
     window.addEventListener('error', function (e) { errors.push(String(e.message)); });
+    window.addEventListener('unhandledrejection', function (e) {
+      var r = e && e.reason;
+      errors.push('REJ:' + String(r && r.message ? r.message : r));
+    });
     var results = [];
 
     function report() {
@@ -432,6 +439,131 @@
           g.panel.close();
           g.entityManager.remove(chestEnt);
         }
+
+        // --- Mobs and A* pathfinding -------------------------------------
+        var zSchema = AllDogs.entitySchemas ? AllDogs.entitySchemas.get('zombie') : null;
+        results.push('zombieSchema=' + (zSchema && zSchema.mob ? 1 : 0));
+        var zSpawned = 0;
+        for (var zi = 0; zi < g.entityManager.entities.length; zi++) {
+          if (g.entityManager.entities[zi].type === 'zombie') zSpawned++;
+        }
+        results.push('zombiesSpawned=' + zSpawned);
+
+        var zEnt = g.entityManager.create('zombie', { pos: { x: 0.5, y: 20, z: 0.5 } });
+        var zOk = !!(zEnt && Math.abs(zEnt.height - 1.8) < 1e-6 &&
+          Math.abs((zEnt.bounds.max.y - zEnt.bounds.min.y) - 1.8) < 1e-6 &&
+          zEnt.mesh);
+        results.push('zombieCreate=' + (zOk ? 1 : 0));
+
+        var zbx = Math.floor(g.player.pos.x) + 12;
+        var zbz = Math.floor(g.player.pos.z) - 12;
+        var zpy = 30;
+        for (var zpx = zbx; zpx <= zbx + 4; zpx++) {
+          for (var zpz = zbz; zpz <= zbz + 4; zpz++) {
+            g.world.set(zpx, zpy, zpz, AllDogs.blocks.BLOCK.STONE);
+          }
+        }
+        var zPath = AllDogs.pathfinder.findPath(
+          g.world, zbx + 0.5, zpy + 1, zbz + 0.5,
+          zbx + 3.5, zpy + 1, zbz + 3.5,
+          { height: 2, maxNodes: 300, maxDistance: 20 }
+        );
+        results.push('astarPath=' + (zPath && zPath.length >= 2 ? 1 : 0) + ':' + (zPath ? zPath.length : -1));
+
+        g.entityManager.add(zEnt);
+        zEnt.pos.set(zbx + 0.5, zpy + 1, zbz + 0.5);
+        zEnt.onGround = true;
+        zEnt.path = zPath;
+        zEnt.pathIndex = 0;
+        zEnt.pathGoal = { x: zbx + 3.5, y: zpy + 1, z: zbz + 3.5 };
+        zEnt.pathCooldown = 999;
+        var zmx = zEnt.pos.x;
+        var zmz = zEnt.pos.z;
+        var zMock = {
+          world: g.world,
+          player: { pos: { x: zbx + 3.5, y: zpy + 1, z: zbz + 3.5 } }
+        };
+        for (var zm = 0; zm < 20; zm++) zEnt.update(0.05, zMock);
+        results.push('mobMoved=' + (Math.abs(zEnt.pos.x - zmx) + Math.abs(zEnt.pos.z - zmz) > 0.1 ? 1 : 0));
+        results.push('mobGrounded=' + (zEnt.onGround ? 1 : 0));
+
+        // A staircase-shaped path across open ground should be string-pulled
+        // into a diagonal heading instead of steering along each cell edge.
+        zEnt.pos.set(zbx + 0.5, zpy + 1, zbz + 0.5);
+        zEnt.path = [
+          { x: zbx + 1, y: zpy + 1, z: zbz },
+          { x: zbx + 1, y: zpy + 1, z: zbz + 1 },
+          { x: zbx + 2, y: zpy + 1, z: zbz + 1 },
+          { x: zbx + 2, y: zpy + 1, z: zbz + 2 },
+          { x: zbx + 3, y: zpy + 1, z: zbz + 2 }
+        ];
+        zEnt.pathIndex = 0;
+        zEnt._steerPath = null;
+        zEnt._steerNode = null;
+        zEnt._steerTimer = 0;
+        var zNav = zEnt.followPath(g.world);
+        results.push('mobSmooth=' + (zNav && Math.abs(zNav.dx) > 0.5 && Math.abs(zNav.dz) > 0.5 ? 1 : 0));
+        g.entityManager.remove(zEnt);
+
+        // --- Mob / player rigid-body separation ---------------------------
+        function overlapsXZ(a, b) {
+          var ba = a.bounds;
+          var bb = b.bounds;
+          var ox = Math.min(ba.max.x, bb.max.x) - Math.max(ba.min.x, bb.min.x);
+          var oy = Math.min(ba.max.y, bb.max.y) - Math.max(ba.min.y, bb.min.y);
+          var oz = Math.min(ba.max.z, bb.max.z) - Math.max(ba.min.z, bb.min.z);
+          return ox > 0.001 && oy > 0.001 && oz > 0.001;
+        }
+
+        var colCX = zbx + 2.5;
+        var colCZ = zbz + 2.5;
+        var colCY = zpy + 1;
+        for (var colX = zbx; colX <= zbx + 4; colX++) {
+          for (var colZ = zbz; colZ <= zbz + 4; colZ++) {
+            g.world.set(colX, zpy + 1, colZ, 0);
+            g.world.set(colX, zpy + 2, colZ, 0);
+            g.world.set(colX, zpy + 3, colZ, 0);
+          }
+        }
+        var colPrev = { x: g.player.pos.x, y: g.player.pos.y, z: g.player.pos.z };
+        g.player.state = 'stand';
+        g.player.pos.set(colCX, colCY, colCZ);
+        g.player.vel.set(0, 0, 0);
+
+        var colA = g.entityManager.create('zombie', { pos: { x: colCX + 0.2, y: colCY, z: colCZ } });
+        var colB = g.entityManager.create('zombie', { pos: { x: colCX, y: colCY, z: colCZ + 0.2 } });
+        g.entityManager.add(colA);
+        g.entityManager.add(colB);
+
+        var colStart = {
+          px: g.player.pos.x, pz: g.player.pos.z,
+          ax: colA.pos.x, az: colA.pos.z,
+          bx: colB.pos.x, bz: colB.pos.z
+        };
+        var colBefore = overlapsXZ(g.player, colA) && overlapsXZ(g.player, colB) &&
+          overlapsXZ(colA, colB);
+        var colMoved = false;
+        for (var colStep = 0; colStep < 8; colStep++) {
+          if (AllDogs.mobCollision.update(0.016, g)) colMoved = true;
+        }
+        var colPush =
+          Math.abs(g.player.pos.x - colStart.px) + Math.abs(g.player.pos.z - colStart.pz) +
+          Math.abs(colA.pos.x - colStart.ax) + Math.abs(colA.pos.z - colStart.az) +
+          Math.abs(colB.pos.x - colStart.bx) + Math.abs(colB.pos.z - colStart.bz);
+        var colSeparated = !overlapsXZ(g.player, colA) &&
+          !overlapsXZ(g.player, colB) && !overlapsXZ(colA, colB);
+        var colClear = !g.player.overlapsAt(g.world, g.player.pos.x, g.player.pos.y, g.player.pos.z) &&
+          !colA.overlapsAt(g.world, colA.pos.x, colA.pos.y, colA.pos.z) &&
+          !colB.overlapsAt(g.world, colB.pos.x, colB.pos.y, colB.pos.z);
+        results.push('mobCollide=' + (colBefore && colSeparated ? 1 : 0));
+        results.push('mobCollideMoved=' + (colMoved && colPush > 0.05 ? 1 : 0));
+        results.push('mobCollideClear=' + (colClear ? 1 : 0));
+
+        g.entityManager.remove(colA);
+        g.entityManager.remove(colB);
+        g.player.pos.set(colPrev.x, colPrev.y, colPrev.z);
+        g.player.vel.set(0, 0, 0);
+        g.player.syncCamera(true, 0);
       } catch (err) {
         results.push('EXC:' + String(err && err.message ? err.message : err));
       }

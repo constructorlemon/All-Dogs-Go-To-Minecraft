@@ -1247,7 +1247,11 @@ this.started = false;
 
       if (this.input.locked && !this.inventoryOpen) {
         this.player.update(dt, this.input, this.world);
+        if (AllDogs.pathfinder) AllDogs.pathfinder.update(dt, this);
         this.entityManager.update(dt, this);
+        if (AllDogs.mobCollision && AllDogs.mobCollision.update(dt, this)) {
+          this.player.syncCamera(false, 0);
+        }
         this.updateTarget();
         this.collectDrops();
       }
