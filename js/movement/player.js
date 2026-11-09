@@ -13,6 +13,7 @@
   var PLAYER_EYE = C.PLAYER_EYE;
   var PLAYER_HALF_WIDTH = C.PLAYER_HALF_WIDTH;
   var PLAYER_MASS = C.PLAYER_MASS || 4;
+  var PLAYER_MAX_HEALTH = C.PLAYER_MAX_HEALTH || 100;
   var MOUSE_SENSITIVITY = C.MOUSE_SENSITIVITY;
   var MAX_PITCH = C.MAX_PITCH;
   var CROUCH_HEIGHT = C.CROUCH_HEIGHT;
@@ -64,6 +65,8 @@ var _fwd = new THREE.Vector3();
       this.pos = new THREE.Vector3();
       this.vel = new THREE.Vector3();
       this.mass = PLAYER_MASS;
+      this.maxHealth = PLAYER_MAX_HEALTH;
+      this.health = PLAYER_MAX_HEALTH;
       this.yaw = Math.PI;
       this.pitch = 0;
       this.onGround = false;
@@ -104,6 +107,7 @@ var _fwd = new THREE.Vector3();
     spawn(x, y, z) {
       this.pos.set(x, y, z);
       this.vel.set(0, 0, 0);
+      this.health = this.maxHealth;
       this.yaw = Math.PI;
       this.pitch = 0;
       this.onGround = false;
@@ -305,6 +309,15 @@ var _fwd = new THREE.Vector3();
       } else if (!this.exhausted) {
         this.stamina = Math.min(STAMINA_MAX, this.stamina + rate * dt);
       }
+    }
+
+    // Health is intentionally non-lethal for now: damage clamps at zero but
+    // never removes the player. A death/respawn system can hook in later.
+    damage(amount, source) {
+      amount = Number(amount);
+      if (!isFinite(amount) || amount <= 0) return false;
+      this.health = Math.max(0, this.health - amount);
+      return true;
     }
 
     spendStamina(cost) {

@@ -7,9 +7,17 @@
   var BODY_H = 1.8;
   var BODY_D = 0.6;
   var ATTACK_RANGE = 1.2;
+  var ATTACK_DAMAGE = 6;
+  var ATTACK_COOLDOWN_MS = 900;
 
   var _geo = null;
   var _mat = null;
+
+  function nowMs() {
+    return typeof performance !== 'undefined' && performance.now
+      ? performance.now()
+      : Date.now();
+  }
 
   function bodyGeometry() {
     if (!_geo) _geo = new THREE.BoxGeometry(BODY_W, BODY_H, BODY_D);
@@ -47,6 +55,12 @@
     return dx * dx + dz * dz;
   }
 
+  function attackReady(mob) {
+    var bb = mob && mob.brain ? mob.brain.blackboard : null;
+    if (!bb) return true;
+    return nowMs() >= (Number(bb.nextAttackAt) || 0);
+  }
+
   function facts(mob, game) {
     var player = game && game.player;
     var hasPlayer = !!(player && player.pos);
@@ -57,7 +71,8 @@
     return {
       hasPlayer: hasPlayer,
       hasTarget: !!current,
-      inRange: inRange
+      inRange: inRange,
+      attackReady: attackReady(mob)
     };
   }
 
@@ -107,6 +122,33 @@
     }
   };
 
+  var attackTarget = {
+    name: 'attackTarget',
+    cost: 1,
+    pre: { hasTarget: true, inRange: true, attackReady: true },
+    effects: { attackReady: false },
+    instant: true,
+    run: function (mob, game) {
+      var current = currentTarget(mob);
+      if (!current || !current.pos || typeof current.damage !== 'function') {
+        return 'failed';
+      }
+      if (horizontalDistanceSq(mob, current) > ATTACK_RANGE * ATTACK_RANGE) {
+        return 'failed';
+      }
+
+      var dx = current.pos.x - mob.pos.x;
+      var dz = current.pos.z - mob.pos.z;
+      if (dx * dx + dz * dz > 1e-8) mob.yaw = Math.atan2(dx, dz);
+
+      current.damage(ATTACK_DAMAGE, mob);
+      if (mob.brain) {
+        mob.brain.blackboard.nextAttackAt = nowMs() + ATTACK_COOLDOWN_MS;
+      }
+      return true;
+    }
+  };
+
   var schema = {
     name: 'Zombie',
     mob: {
@@ -136,14 +178,21 @@
       facts: facts,
       goals: [
         {
+          name: 'attack',
+          priority: function (mob, game, state) {
+            return state.hasTarget && state.inRange && state.attackReady ? 20 : -Infinity;
+          },
+          desired: { attackReady: false }
+        },
+        {
           name: 'hunt',
           priority: function (mob, game, state) {
             return state.hasPlayer ? 10 : -Infinity;
           },
-          desired: { inRange: true }
+          desired: { hasTarget: true, inRange: true }
         }
       ],
-      actions: [acquireTarget, chaseTarget]
+      actions: [acquireTarget, chaseTarget, attackTarget]
     },
     onHurt: function (mob) {
       if (mob && mob.brain) mob.brain.wake();

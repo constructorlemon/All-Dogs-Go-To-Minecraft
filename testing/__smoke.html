@@ -13,6 +13,7 @@
     <div id="crosshair"></div>
     <div id="zone-label">Zone: Loading...</div>
     <div id="hint"></div>
+    <div id="health"><div class="health-fill"></div><div class="health-ticks"></div></div>
     <div id="stamina"><div class="stamina-fill"></div><div class="stamina-ticks"></div></div>
   </div>
 
@@ -72,6 +73,7 @@
   <script src="../js/ui/hud.js"></script>
   <script src="../js/ui/hotbar.js"></script>
   <script src="../js/ui/stamina.js"></script>
+  <script src="../js/ui/health.js"></script>
   <script src="../js/ui/signEditor.js"></script>
   <script src="../js/ui/inventoryPanel.js"></script>
   <script src="../js/ui/debug.js"></script>
@@ -113,6 +115,25 @@
       try {
         results.push('renderer=' + (g.renderer ? 1 : 0));
         results.push('boot=1');
+
+        // --- Player health and health bar --------------------------------
+        results.push('healthBar=' + (g.healthBar && g.healthBar.root ? 1 : 0));
+        results.push('healthTicks=' + (document.querySelector('#health .health-ticks') ? 1 : 0));
+        var hp0 = g.player.health;
+        g.player.damage(30);
+        var hp1 = g.player.health;
+        g.player.damage(9999);
+        var hp2 = g.player.health;
+        results.push('healthDamage=' + (hp0 === AllDogs.constants.PLAYER_MAX_HEALTH &&
+          hp1 === hp0 - 30 && hp2 === 0 ? 1 : 0));
+        results.push('healthNoDeath=' + (g.player && g.player.pos && g.player.health === 0 ? 1 : 0));
+        g.player.health = 30;
+        g.healthBar.update(g.player);
+        results.push('healthFill=' + (parseFloat(g.healthBar.fill.style.width) === 30 ? 1 : 0));
+        g.player.health = g.player.maxHealth;
+        g.healthBar.update(g.player);
+        results.push('healthFull=' + (parseFloat(g.healthBar.fill.style.width) === 100 ? 1 : 0));
+
         results.push('used=' + g.inventory.usedSlots() + '/' + g.inventory.capacity);
         results.push('slots=' + JSON.stringify(g.inventory.slots.map(function (s) { return s ? s.id + ':' + s.qty : null; })));
 
@@ -522,10 +543,36 @@
         zEnt.brain = zBrain;
         var zMockGoap = { player: { pos: { x: 120.5, y: 30, z: 120.5 } } };
         var zFacts = zSchema.goap.facts(zEnt, zMockGoap);
-        var zGoal = zSchema.goap.goals[0];
+        var zGoal = null;
+        var zAttackGoal = null;
+        for (var zg = 0; zg < zSchema.goap.goals.length; zg++) {
+          if (zSchema.goap.goals[zg].name === 'hunt') zGoal = zSchema.goap.goals[zg];
+          if (zSchema.goap.goals[zg].name === 'attack') zAttackGoal = zSchema.goap.goals[zg];
+        }
         var zPlan = AllDogs.goap.plan(zSchema.goap, zFacts, zEnt, zMockGoap, { goal: zGoal });
         results.push('goapZombiePlan=' + (zPlan && zPlan.length >= 2 ? 1 : 0) +
           ':' + (zPlan ? zPlan.length : -1));
+
+        // A zombie standing next to the player should plan and land one
+        // attack, damage the player, and start its cooldown.
+        var hpBeforeAttack = g.player.health;
+        zEnt.pos.set(g.player.pos.x + 0.5, g.player.pos.y, g.player.pos.z);
+        zEnt.brain.blackboard.target = g.player;
+        zEnt.brain.blackboard.nextAttackAt = 0;
+        var zAttackFacts = zSchema.goap.facts(zEnt, g);
+        var zAttackPlan = AllDogs.goap.plan(zSchema.goap, zAttackFacts, zEnt, g,
+          { goal: zAttackGoal });
+        var zAttacked = !!(zAttackPlan && zAttackPlan.length === 1 &&
+          zAttackPlan[0].name === 'attackTarget' && zAttackPlan[0].run(zEnt, g));
+        results.push('zombieAttackPlan=' + (zAttackPlan && zAttackPlan.length === 1 &&
+          zAttackPlan[0].name === 'attackTarget' ? 1 : 0));
+        results.push('zombieAttackDamage=' + (zAttacked &&
+          g.player.health === hpBeforeAttack - 6 ? 1 : 0));
+        results.push('zombieAttackCooldown=' + (zEnt.brain.blackboard.nextAttackAt >
+          (performance || Date).now() ? 1 : 0));
+        zEnt.brain.blackboard.target = null;
+        zEnt.brain.blackboard.nextAttackAt = 0;
+        g.player.health = g.player.maxHealth;
 
         var benchDef = AllDogs.goap.define('__smoke_bench', {
           idleTicks: 60,

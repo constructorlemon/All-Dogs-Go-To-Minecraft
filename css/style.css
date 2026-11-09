@@ -166,6 +166,39 @@ body {
   max-width: 52px;
 }
 
+#health {
+  position: fixed;
+  left: calc(50% - 180px);
+  bottom: 112px;
+  width: 180px;
+  height: 7px;
+  border-radius: 0;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  z-index: 3;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.health-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(#ff5a4f, #cf2b25);
+}
+
+.health-ticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent 0,
+    transparent calc(10% - 1px),
+    rgba(255, 255, 255, 0.55) calc(10% - 1px),
+    rgba(255, 255, 255, 0.55) 10%
+  );
+}
+
 #stamina {
   position: fixed;
   left: 50%;

@@ -75,6 +75,7 @@ this.started = false;
       this.hud = new AllDogs.Hud();
       this.hotbar = new AllDogs.Hotbar();
       this.staminaBar = new AllDogs.StaminaBar();
+      this.healthBar = new AllDogs.HealthBar();
       this.panel = new AllDogs.InventoryPanel();
       this.signEditor = new AllDogs.SignEditor();
       this.debug = new AllDogs.DebugHud();
@@ -1258,6 +1259,7 @@ this.started = false;
       }
 
 
+      this.healthBar.update(this.player);
       this.staminaBar.update(this.player);
 
 

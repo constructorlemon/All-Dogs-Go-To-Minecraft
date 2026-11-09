@@ -21,7 +21,7 @@ This document describes the systems implemented in the current codebase. It is a
 4. Updates and expires item drops.
 5. Updates the debug HUD when visible.
 6. While pointer locked and the inventory is closed, updates the player, runs the global pathfinding and GOAP planning schedulers, updates entities, resolves player/mob rigid-body overlap, target raycasts, and drop pickup.
-7. Updates the stamina HUD and renders the Three.js scene.
+7. Updates the health and stamina HUDs and renders the Three.js scene.
 
 ## 2. World model and terrain generation
 
@@ -108,13 +108,14 @@ The center-screen `BlockRaycaster` intersects rendered chunk meshes up to `REACH
 - Sprinting jumps immediately. Holding Space after landing chains sprint jumps and increases the jump boost.
 - Crawling plus Space performs a short directional dash with an upward impulse.
 
-### Collision and stamina
+### Collision, stamina, and health
 
 - Gravity, terminal fall speed, solid voxel cells, and entity AABBs are applied in the player movement step.
 - The player can step up by `STEP_HEIGHT` (0.5). Crouching/crawling use edge support checks so the player does not casually walk off a ledge.
 - Mod block `onCollide` hooks can run when an overlap is detected.
 - Stamina ranges from 0 to 1. Sprinting drains it; walking and idling regenerate it, with slower regeneration in air and a delay after exertion. Normal jumps, crouch charge jumps, sprint jumps, and dashes also spend stamina. Sprint jumps repeated within six update frames of the previous jump receive a stamina-cost grace period to prevent rapid ceiling-bounce jumps from draining the bar.
 - Exhaustion prevents sprint/jump actions until stamina fully recovers. `StaminaBar` displays fill, color thresholds, charging state, and exhaustion state.
+- Health ranges from 0 to `PLAYER_MAX_HEALTH` (100). `Player.damage(amount, source)` subtracts health and clamps it at zero, but the player is intentionally not removed or respawned yet. `HealthBar` sits above the stamina bar, aligned to its left half, and draws 10% tick markers like the stamina bar.
 
 ## 5. Inventory, hotbar, crafting, and smelting
 
@@ -175,7 +176,7 @@ Idling is built into the brain. When no goal applies, a plan fails, or a plan co
 
 - **Sign:** a wooden board and post with a canvas-rendered message. Text is limited to four lines and can be edited through the sign editor. The saved position uses the ground coordinate rather than the board’s visual center.
 - **Chest:** a solid collider with a hinged animated lid. Interaction opens a 27-slot container UI instead of only toggling the lid. Each chest owns a separate inventory keyed by its rounded entity position, so generated and player-placed chests both keep individual contents. Breaking a chest drops every stored stack on the ground. Chest behavior is implemented by the built-in entity schema `mods/schema/Chest.js`.
-- **Zombie:** a 2-block-tall dark green rectangular prism driven by GOAP. Its `hunt` goal picks the player when present; an acquire action stores the target and a chase action navigates with the shared A* pathfinder, switching to a direct line when the player is visible. It jumps automatically when blocked or when the next node is higher, stops at melee distance, sleeps on the brain's idle path when it has nothing to do, has 20 health, and is implemented by the built-in entity schema `mods/schema/Zombie.js`.
+- **Zombie:** a 2-block-tall dark green rectangular prism driven by GOAP. Its `hunt` goal picks the player when present; an acquire action stores the target and a chase action navigates with the shared A* pathfinder, switching to a direct line when the player is visible. Once in melee range, an `attack` goal runs an instant attack action that deals 6 damage to the player on a 900 ms cooldown (`performance.now()` based so it does not consume the game clock). It jumps automatically when blocked or when the next node is higher, stops at melee distance, sleeps on the brain's idle path when it has nothing to do, has 20 health, and is implemented by the built-in entity schema `mods/schema/Zombie.js`.
 - **Generated furniture:** structures create signs and chests as generated entities. They are loaded/unloaded with their origin chunk.
 
 Generated entities are marked separately from player-placed entities. Removing one records a stable type/position key so it stays removed after chunk reloads. Generated sign edits use the same key; player-placed entity records are written directly to saves.
@@ -235,7 +236,7 @@ The save system intentionally does **not** currently serialize normal inventory,
 - **World selector:** new seed/random seed, creative checkbox, save-file picker, validation messages, controls link, and F3 mod-tools menu.
 - **Loading screen:** structure precomputation progress bar and a tile grid showing waiting, active, processed, and complete cache cells.
 - **Start state:** the player is rendered at the spawn point immediately, while movement remains paused behind the `Click to start` HUD prompt until the first canvas interaction.
-- **HUD:** crosshair, zone label, transient action messages, hotbar, and stamina bar.
+- **HUD:** crosshair, zone label, transient action messages, hotbar, player health bar, and stamina bar.
 - **Inventory:** modal overlay with crafting, furnace, or chest container view, item icons, selection, drag/drop, and stack distribution. The chest view puts the 27-slot chest grid above the player inventory.
 - **Sign editor:** four-line textarea with Save, Enter-to-save, Escape-to-cancel, and outside-click cancellation.
 - **Pause menu:** M toggles resume, save, instructions, and main-menu actions. Releasing pointer lock prevents the world from responding while the menu is open.
@@ -272,7 +273,7 @@ The current checked-in examples include furnace, transparent, and rotated test t
 
 ## 11. Testing and diagnostics
 
-`testing/__smoke.html` is the primary executable verification surface. It checks boot/render setup, inventory, mod schema registration, furnace opening and smelting, chest containers and save round trips, block interaction, seeded world generation, chunk streaming budgets, greedy mesh rebuilds, structures and orientation, generated furniture, save/parse/apply round trips, zombie schema registration, test-zombie spawning, A* path production, mob movement and navigation, player/mob rigid-body separation, GOAP plan production, and the 1000-brain idle fast path. Results are written to a `#smoke-result` element using `data-smoke` and `data-errors` attributes.
+`testing/__smoke.html` is the primary executable verification surface. It checks boot/render setup, player health damage/clamping and health-bar fill, inventory, mod schema registration, furnace opening and smelting, chest containers and save round trips, block interaction, seeded world generation, chunk streaming budgets, greedy mesh rebuilds, structures and orientation, generated furniture, save/parse/apply round trips, zombie schema registration, test-zombie spawning, A* path production, mob movement and navigation, player/mob rigid-body separation, GOAP plan production, the zombie attack plan/damage/cooldown, and the 1000-brain idle fast path. Results are written to a `#smoke-result` element using `data-smoke` and `data-errors` attributes.
 
 The in-game F3 overlay is useful for runtime performance and streaming diagnostics. There is no package-managed unit-test suite or build step; the application is run as static files with the browser smoke page and the Node manifest scanner as the main tooling.
 
