@@ -8,6 +8,7 @@
   var BODY_D = 0.6;
   var ATTACK_RANGE = 1.2;
   var ATTACK_DAMAGE = 6;
+  var ATTACK_KNOCKBACK = 4;
   var ATTACK_COOLDOWN_MS = 900;
 
   var _geo = null;
@@ -142,6 +143,9 @@
       if (dx * dx + dz * dz > 1e-8) mob.yaw = Math.atan2(dx, dz);
 
       current.damage(ATTACK_DAMAGE, mob);
+      if (typeof current.applyKnockback === 'function') {
+        current.applyKnockback(dx, dz, ATTACK_KNOCKBACK);
+      }
       if (mob.brain) {
         mob.brain.blackboard.nextAttackAt = nowMs() + ATTACK_COOLDOWN_MS;
       }
@@ -154,6 +158,7 @@
     mob: {
       width: BODY_W,
       height: BODY_H,
+      weight: 0.8,
       maxHealth: 20,
       speed: 2.1,
       jumpHeight: 1.35,

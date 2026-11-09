@@ -6,6 +6,11 @@
   // horizontal overlap is resolved so creatures never get launched upward or
   // tipped onto their sides. The broadphase is a uniform grid in the XZ plane;
   // the solver then runs a few Gauss-Seidel passes over the candidate pairs.
+  //
+  // Weight is the collision "mass" of a body: the inverse weight decides how
+  // much of an overlap correction each side takes. The solver also applies an
+  // impulse based on closing speed, so a body walking into another transfers
+  // momentum while a motionless overlap only separates positionally.
   var CELL_SIZE = 1.5;
   var ITERATIONS = 3;
   // Cap the number of pair resolutions per frame. A dense horde can otherwise
@@ -15,6 +20,13 @@
   var MAX_RESOLVE_STEPS = 1024;
   var SLOP = 0.0005;
   var EPS = 1e-6;
+  // Impact tuning. Restitution adds a small bounce to fast collisions; below
+  // the threshold the impulse is purely inelastic so slow contact stays calm.
+  var RESTITUTION = 0.12;
+  var RESTITUTION_MIN_SPEED = 1.2;
+  var IMPACT_KNOCK_MIN_SPEED = 1.5;
+  var IMPACT_KNOCK_SCALE = 0.055;
+  var IMPACT_KNOCK_MAX_TIME = 0.45;
 
   var _bodies = [];
   var _cells = new Map();
@@ -23,12 +35,21 @@
   var _moved = [];
   var _pairCursor = 0;
 
+  function bodyWeight(body) {
+    var weight = body && body.weight;
+    if (typeof weight !== 'number' || !isFinite(weight) || weight <= 0) {
+      weight = body && body.mass;
+    }
+    if (typeof weight !== 'number' || !isFinite(weight) || weight <= 0) weight = 1;
+    return weight;
+  }
+
   function isDynamicBody(entity) {
     return !!entity &&
       entity.alive !== false &&
       entity.pos &&
       typeof entity.overlapsAt === 'function' &&
-      entity.mass > 0;
+      bodyWeight(entity) > 0;
   }
 
   function boundsOverlap(a, b) {
@@ -106,8 +127,8 @@
     else if (delta < -EPS) sign = -1;
     else sign = a._collisionOrder < b._collisionOrder ? 1 : -1;
 
-    var invA = 1 / a.mass;
-    var invB = 1 / b.mass;
+    var invA = 1 / bodyWeight(a);
+    var invB = 1 / bodyWeight(b);
     var invSum = invA + invB;
     if (invSum <= 0) return;
     var shareA = invA / invSum;
@@ -123,18 +144,21 @@
       tryMove(b, 0, moveB, world);
     }
 
-    // Inelastic collision impulse: cancel the closing velocity along the
-    // separation normal. Position correction already does most of the work;
-    // the impulse stops bodies from repeatedly driving into the same overlap.
+    // Impulse along the separation normal. `approach` is positive while the
+    // bodies are still closing. The applied velocity change is split by
+    // inverse weight, so a light zombie picks up far more speed than the
+    // heavier player. This is what makes a full-speed collision push much
+    // harder than leaning on a stationary body.
     var nx = axis === 'x' ? sign : 0;
     var nz = axis === 'z' ? sign : 0;
     var avx = a.vel ? a.vel.x : 0;
     var avz = a.vel ? a.vel.z : 0;
     var bvx = b.vel ? b.vel.x : 0;
     var bvz = b.vel ? b.vel.z : 0;
-    var closing = (bvx - avx) * nx + (bvz - avz) * nz;
-    if (closing < 0) {
-      var impulse = -closing / invSum;
+    var approach = (avx - bvx) * nx + (avz - bvz) * nz;
+    if (approach > 0) {
+      var restitution = approach > RESTITUTION_MIN_SPEED ? RESTITUTION : 0;
+      var impulse = (1 + restitution) * approach / invSum;
       if (a.vel) {
         a.vel.x -= impulse * invA * nx;
         a.vel.z -= impulse * invA * nz;
@@ -142,6 +166,14 @@
       if (b.vel) {
         b.vel.x += impulse * invB * nx;
         b.vel.z += impulse * invB * nz;
+      }
+
+      // Big contacts briefly disable mob steering so the transferred momentum
+      // actually carries them instead of being cancelled on the next frame.
+      if (approach > IMPACT_KNOCK_MIN_SPEED) {
+        var duration = Math.min(IMPACT_KNOCK_MAX_TIME, approach * IMPACT_KNOCK_SCALE);
+        if (typeof a.receiveImpact === 'function') a.receiveImpact(duration);
+        if (typeof b.receiveImpact === 'function') b.receiveImpact(duration);
       }
     }
   }
@@ -258,7 +290,10 @@
       cellSize: CELL_SIZE,
       iterations: ITERATIONS,
       maxResolveSteps: MAX_RESOLVE_STEPS,
-      slop: SLOP
+      slop: SLOP,
+      restitution: RESTITUTION,
+      impactKnockMinSpeed: IMPACT_KNOCK_MIN_SPEED,
+      impactKnockMaxTime: IMPACT_KNOCK_MAX_TIME
     }
   };
 })();

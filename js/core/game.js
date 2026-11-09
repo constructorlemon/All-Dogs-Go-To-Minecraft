@@ -645,6 +645,59 @@ this.started = false;
     }
 
 
+    // Shared removal path for entities broken or killed by the player.
+    removeEntity(ent) {
+      var schema = AllDogs.entitySchemas ? AllDogs.entitySchemas.get(ent.type) : null;
+      if (schema && schema.onDestroy) {
+        try { schema.onDestroy({ game: this, entity: ent }); } catch (err) {}
+      }
+      if (ent.generated) {
+        var ep = this.entitySavePos(ent);
+        this.entityRemovals[this.entityKeyOf(ent.type, ep.x, ep.y, ep.z)] = {
+          type: ent.type, x: ep.x, y: ep.y, z: ep.z
+        };
+      }
+      if (ent.solidBlock) this.world.removeCollider(ent);
+      this.entityManager.remove(ent);
+      if (this.targetEntity === ent) this.targetEntity = null;
+    }
+
+
+    // Left-clicking a living mob is a melee attack, not an instant break.
+    // Damage plus a weight-scaled shove lets the same strike hurt, stagger,
+    // and eventually kill instead of popping the entity out of existence.
+    attackEntity(ent) {
+      var c = AllDogs.constants || {};
+      var damage = c.PLAYER_ATTACK_DAMAGE || 5;
+      var baseKnockback = c.PLAYER_ATTACK_KNOCKBACK || 2.5;
+      var speedScale = c.PLAYER_ATTACK_SPEED_SCALE || 0.6;
+      var player = this.player;
+
+      var dx = ent.pos.x - player.pos.x;
+      var dz = ent.pos.z - player.pos.z;
+      if (dx * dx + dz * dz < 1e-6) {
+        dx = -Math.sin(player.yaw);
+        dz = -Math.cos(player.yaw);
+      }
+      var speed = Math.sqrt(player.vel.x * player.vel.x + player.vel.z * player.vel.z);
+      var knockback = baseKnockback + speed * speedScale;
+
+      if (typeof ent.hit === 'function') {
+        ent.hit(damage, player, { knockback: { x: dx, z: dz, speed: knockback } });
+      } else {
+        if (typeof ent.damage === 'function') ent.damage(damage, player);
+        if (typeof ent.applyKnockback === 'function') ent.applyKnockback(dx, dz, knockback);
+      }
+
+      if (!ent.alive) {
+        this.hud.flash('Defeated the ' + ent.type);
+        this.removeEntity(ent);
+      } else {
+        this.hud.flash('Hit the ' + ent.type);
+      }
+    }
+
+
     tryBreak() {
       if (this.targetEntity) {
         var ent = this.targetEntity;
@@ -656,18 +709,11 @@ this.started = false;
           this.hotbar.el.classList.remove('inv-open');
           if (!this.input.locked) this.input.requestLock();
         }
-        var schema = AllDogs.entitySchemas ? AllDogs.entitySchemas.get(ent.type) : null;
-        if (schema && schema.onDestroy) {
-          try { schema.onDestroy({ game: this, entity: ent }); } catch (err) {}
+        if (typeof ent.hit === 'function') {
+          this.attackEntity(ent);
+          return;
         }
-        if (ent.generated) {
-          var ep = this.entitySavePos(ent);
-          this.entityRemovals[this.entityKeyOf(ent.type, ep.x, ep.y, ep.z)] = {
-            type: ent.type, x: ep.x, y: ep.y, z: ep.z
-          };
-        }
-        if (ent.solidBlock) this.world.removeCollider(ent);
-        this.entityManager.remove(ent);
+        this.removeEntity(ent);
         this.targetEntity = null;
         if (itemId && !this.creative) {
           if (this.inventory.add(itemId, 1)) {

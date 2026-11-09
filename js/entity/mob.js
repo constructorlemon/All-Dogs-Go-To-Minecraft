@@ -12,6 +12,9 @@
     width: 0.6,
     height: 1.8,
     mass: 1,
+    weight: 1,
+    accel: 14,
+    friction: 18,
     maxHealth: 20,
     speed: 2,
     jumpHeight: 1.3,
@@ -25,6 +28,10 @@
     pathMaxDrop: 4,
     pathGoalRadius: 1.35
   };
+
+  var KNOCKBACK_MIN_TIME = 0.18;
+  var KNOCKBACK_MAX_TIME = 0.55;
+  var KNOCKBACK_TIME_SCALE = 0.07;
 
   function pick() {
     for (var i = 0; i < arguments.length; i++) {
@@ -55,6 +62,9 @@
       this.width = Math.max(0.1, pick(opts.width, cfg.width, DEFAULTS.width));
       this.height = Math.max(0.1, pick(opts.height, cfg.height, DEFAULTS.height));
       this.mass = Math.max(0.01, pick(opts.mass, cfg.mass, DEFAULTS.mass));
+      this.weight = Math.max(0.01, pick(opts.weight, cfg.weight, DEFAULTS.weight));
+      this.accel = Math.max(0.1, pick(opts.accel, cfg.accel, DEFAULTS.accel));
+      this.friction = Math.max(0.1, pick(opts.friction, cfg.friction, DEFAULTS.friction));
       this.halfExtents = { x: this.width / 2, y: this.height / 2, z: this.width / 2 };
       this.meshYOffset = pick(opts.meshYOffset, cfg.meshYOffset, this.height / 2);
 
@@ -94,6 +104,7 @@
 
       this.onGround = false;
       this.hurtTime = 0;
+      this.knockbackTime = 0;
       this.deadTime = 0;
       this.yaw = pick(opts.yaw, 0);
       this._blockedX = false;
@@ -122,6 +133,13 @@
       }
       this.mesh = mesh || fallbackMesh(this);
       if (this.mesh.rotation) this.mesh.rotation.order = 'YXZ';
+
+      // Hurt flashing needs a per-mob material; schemas usually share a cached
+      // material between every instance, so the clone is created lazily the
+      // first time this mob is hurt.
+      this._flashMaterial = null;
+      this._flashBaseEmissive = null;
+      this._flashActive = false;
     }
 
     get bounds() {
@@ -145,8 +163,40 @@
 
     syncMesh() {
       if (!this.mesh) return;
+      this.updateHurtFlash();
       this.mesh.position.set(this.pos.x, this.pos.y + this.meshYOffset, this.pos.z);
       if (this.mesh.rotation) this.mesh.rotation.y = this.yaw;
+    }
+
+    ensureFlashMaterial() {
+      if (this._flashMaterial) return this._flashMaterial;
+      if (!this.mesh || !this.mesh.material || Array.isArray(this.mesh.material)) return null;
+      var mat = this.mesh.material;
+      if (mat.clone) {
+        mat = mat.clone();
+        this.mesh.material = mat;
+      }
+      this._flashMaterial = mat;
+      this._flashBaseEmissive = mat.emissive ? mat.emissive.clone() : null;
+      return mat;
+    }
+
+    // Briefly tint the material red when hurt. Hurt time drives the intensity
+    // so repeated hits keep the flash alive instead of restarting a timer.
+    updateHurtFlash() {
+      if (this.hurtTime <= 0 && !this._flashActive) return;
+      var mat = this.ensureFlashMaterial();
+      if (!mat || !mat.emissive) return;
+      if (this.hurtTime > 0) {
+        var strength = Math.min(1, this.hurtTime / 0.3);
+        var red = 0.18 + strength * 0.42;
+        mat.emissive.setRGB(red, red * 0.05, red * 0.05);
+        this._flashActive = true;
+      } else if (this._flashActive) {
+        if (this._flashBaseEmissive) mat.emissive.copy(this._flashBaseEmissive);
+        else mat.emissive.setRGB(0, 0, 0);
+        this._flashActive = false;
+      }
     }
 
     // Swept AABB test against solid voxels and entity colliders. The small
@@ -184,6 +234,72 @@
       this.vel.y = Math.sqrt(2 * this.gravity * this.jumpHeight);
       this.onGround = false;
       this._jumpLock = 0.15;
+      return true;
+    }
+
+    // Ease the horizontal velocity toward the steering target. The old update
+    // wrote velocity directly, which made collision impulses and knockback
+    // disappear on the very next frame.
+    steerToward(targetVX, targetVZ, dt) {
+      var dvx = targetVX - this.vel.x;
+      var dvz = targetVZ - this.vel.z;
+      var dv = Math.sqrt(dvx * dvx + dvz * dvz);
+      if (dv < 1e-6) {
+        this.vel.x = targetVX;
+        this.vel.z = targetVZ;
+        return;
+      }
+      var moving = targetVX !== 0 || targetVZ !== 0;
+      var maxDelta = (moving ? this.accel : this.friction) * dt;
+      if (dv <= maxDelta) {
+        this.vel.x = targetVX;
+        this.vel.z = targetVZ;
+        return;
+      }
+      var scale = maxDelta / dv;
+      this.vel.x += dvx * scale;
+      this.vel.z += dvz * scale;
+    }
+
+    // Collision solver hook: suppress steering for a moment after a hard hit
+    // so the transferred momentum is visible before the mob resumes chasing.
+    receiveImpact(duration) {
+      if (!isFinite(duration) || duration <= 0) return;
+      this.knockbackTime = Math.max(this.knockbackTime, duration);
+    }
+
+    // Push the mob away from an impact. The requested speed is divided by
+    // weight, so an 0.8-weight zombie travels farther than a 1-weight player.
+    applyKnockback(dx, dz, speed) {
+      speed = Number(speed);
+      if (!isFinite(speed) || speed <= 0) return false;
+      var len = Math.sqrt(dx * dx + dz * dz);
+      if (len < 1e-6) return false;
+      var nx = dx / len;
+      var nz = dz / len;
+      var along = this.vel.x * nx + this.vel.z * nz;
+      var target = speed / this.weight;
+      if (along < target) {
+        var add = target - along;
+        this.vel.x += nx * add;
+        this.vel.z += nz * add;
+      }
+      var duration = Math.min(KNOCKBACK_MAX_TIME,
+        Math.max(KNOCKBACK_MIN_TIME, target * KNOCKBACK_TIME_SCALE));
+      this.knockbackTime = Math.max(this.knockbackTime, duration);
+      return true;
+    }
+
+    // Player-melee entry point. Applies damage and an optional knockback in
+    // one call so callers cannot forget the physical response.
+    hit(amount, source, opts) {
+      if (!this.alive) return false;
+      if (!this.damage(amount, source)) return false;
+      opts = opts || {};
+      var knockback = opts.knockback;
+      if (knockback) {
+        this.applyKnockback(knockback.x, knockback.z, knockback.speed);
+      }
       return true;
     }
 
@@ -228,8 +344,9 @@
       this.pathIndex = 0;
       this.pathGoal = null;
       this.pathCooldown = 0;
-      this.vel.x = 0;
-      this.vel.z = 0;
+      // Horizontal velocity is intentionally left alone. Steering eases the
+      // mob to a stop through friction, which keeps knockback and momentum
+      // visible instead of snapping the body to rest.
     }
 
     isNavigating() {
@@ -402,6 +519,7 @@
       if (!world) return;
 
       if (this.hurtTime > 0) this.hurtTime = Math.max(0, this.hurtTime - dt);
+      if (this.knockbackTime > 0) this.knockbackTime = Math.max(0, this.knockbackTime - dt);
       if (this._jumpLock > 0) this._jumpLock = Math.max(0, this._jumpLock - dt);
       if (this._steerTimer > 0) this._steerTimer = Math.max(0, this._steerTimer - dt);
       if (this._losTimer > 0) this._losTimer = Math.max(0, this._losTimer - dt);
@@ -478,8 +596,15 @@
         this.nav.arrived = false;
       }
 
-      this.vel.x = dirX * this.speed;
-      this.vel.z = dirZ * this.speed;
+      if (this.knockbackTime > 0) {
+        // Knockback owns the horizontal velocity for a moment. A little drag
+        // keeps the slide from looking frictionless without killing it.
+        var drag = Math.exp(-2.2 * dt);
+        this.vel.x *= drag;
+        this.vel.z *= drag;
+      } else {
+        this.steerToward(dirX * this.speed, dirZ * this.speed, dt);
+      }
 
       if (wantJump && this.onGround) this.jump();
 
@@ -493,6 +618,7 @@
       if (!isFinite(amount) || amount <= 0) return false;
       this.health -= amount;
       this.hurtTime = 0.3;
+      this.updateHurtFlash();
       if (this.schema && typeof this.schema.onHurt === 'function') {
         try { this.schema.onHurt(this, source); } catch (err) {}
       }

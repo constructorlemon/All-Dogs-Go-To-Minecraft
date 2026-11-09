@@ -556,6 +556,7 @@
         // A zombie standing next to the player should plan and land one
         // attack, damage the player, and start its cooldown.
         var hpBeforeAttack = g.player.health;
+        g.player.vel.set(0, 0, 0);
         zEnt.pos.set(g.player.pos.x + 0.5, g.player.pos.y, g.player.pos.z);
         zEnt.brain.blackboard.target = g.player;
         zEnt.brain.blackboard.nextAttackAt = 0;
@@ -568,11 +569,40 @@
           zAttackPlan[0].name === 'attackTarget' ? 1 : 0));
         results.push('zombieAttackDamage=' + (zAttacked &&
           g.player.health === hpBeforeAttack - 6 ? 1 : 0));
+        results.push('zombieAttackKnockback=' + (g.player.vel.x < -0.5 ? 1 : 0));
         results.push('zombieAttackCooldown=' + (zEnt.brain.blackboard.nextAttackAt >
           (performance || Date).now() ? 1 : 0));
+        results.push('entityWeights=' + (g.player.weight === 1 && zEnt.weight === 0.8 ? 1 : 0));
         zEnt.brain.blackboard.target = null;
         zEnt.brain.blackboard.nextAttackAt = 0;
         g.player.health = g.player.maxHealth;
+        g.player.vel.set(0, 0, 0);
+
+        // Player melee damages, knocks back, and flashes the zombie instead of
+        // deleting it in one click.
+        var zPrevHealth = zEnt.health;
+        var zHit = zEnt.hit(5, g.player, { knockback: { x: 1, z: 0, speed: 5 } });
+        results.push('zombieHitDamage=' + (zHit && zEnt.health === zPrevHealth - 5 ? 1 : 0));
+        results.push('zombieHitKnockback=' + (zEnt.vel.x > 0.5 ? 1 : 0));
+        results.push('zombieHurtFlash=' + (zEnt.hurtTime > 0 &&
+          zEnt.mesh.material.emissive && zEnt.mesh.material.emissive.r > 0.1 ? 1 : 0));
+        zEnt.health = zEnt.maxHealth;
+        zEnt.hurtTime = 0;
+        zEnt.updateHurtFlash();
+        zEnt.vel.set(0, 0, 0);
+        zEnt.knockbackTime = 0;
+
+        // Player movement ramps toward the target speed instead of snapping.
+        var pStance = g.player.stance;
+        var pOnGround = g.player.onGround;
+        g.player.vel.set(0, 0, 0);
+        g.player.stance = 'sprint';
+        g.player.onGround = true;
+        g.player.updateMomentum(0.016, 8, 0, true);
+        results.push('playerMomentum=' + (g.player.vel.x > 0.05 && g.player.vel.x < 8 ? 1 : 0));
+        g.player.vel.set(0, 0, 0);
+        g.player.stance = pStance;
+        g.player.onGround = pOnGround;
 
         var benchDef = AllDogs.goap.define('__smoke_bench', {
           idleTicks: 60,
@@ -671,6 +701,17 @@
         results.push('mobCollide=' + (colBefore && colSeparated ? 1 : 0));
         results.push('mobCollideMoved=' + (colMoved && colPush > 0.05 ? 1 : 0));
         results.push('mobCollideClear=' + (colClear ? 1 : 0));
+
+        // Closing speed should transfer momentum; the fast player slows and
+        // the lighter zombie is pushed away.
+        colB.pos.set(colCX, colCY, colCZ + 3);
+        colB.vel.set(0, 0, 0);
+        colA.pos.set(colCX + 0.5, colCY, colCZ);
+        colA.vel.set(0, 0, 0);
+        g.player.pos.set(colCX, colCY, colCZ);
+        g.player.vel.set(6, 0, 0);
+        AllDogs.mobCollision.update(0.016, g);
+        results.push('collisionImpulse=' + (colA.vel.x > 0.5 && g.player.vel.x < 6 ? 1 : 0));
 
         g.entityManager.remove(colA);
         g.entityManager.remove(colB);

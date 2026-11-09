@@ -33,6 +33,12 @@
   var JUMP_SPRINT_HEIGHT = C.JUMP_SPRINT_HEIGHT;
   var JUMP_BOOST_HEIGHT = C.JUMP_BOOST_HEIGHT;
   var SPRINT_JUMP_GRACE_FRAMES = C.SPRINT_JUMP_GRACE_FRAMES;
+  var PLAYER_WEIGHT = C.PLAYER_WEIGHT || 1;
+  var PLAYER_ACCEL = C.PLAYER_ACCEL || 24;
+  var PLAYER_SPRINT_ACCEL = C.PLAYER_SPRINT_ACCEL || 30;
+  var PLAYER_AIR_ACCEL = C.PLAYER_AIR_ACCEL || 10;
+  var PLAYER_GROUND_FRICTION = C.PLAYER_GROUND_FRICTION || 20;
+  var PLAYER_AIR_FRICTION = C.PLAYER_AIR_FRICTION || 0.8;
   var STAMINA_MAX = C.STAMINA_MAX;
   var STAMINA_RUN_DRAIN = C.STAMINA_RUN_DRAIN;
   var STAMINA_WALK_REGEN = C.STAMINA_WALK_REGEN;
@@ -65,6 +71,7 @@ var _fwd = new THREE.Vector3();
       this.pos = new THREE.Vector3();
       this.vel = new THREE.Vector3();
       this.mass = PLAYER_MASS;
+      this.weight = PLAYER_WEIGHT;
       this.maxHealth = PLAYER_MAX_HEALTH;
       this.health = PLAYER_MAX_HEALTH;
       this.yaw = Math.PI;
@@ -201,8 +208,12 @@ var _fwd = new THREE.Vector3();
 
       if (moving) _moveDirection.normalize();
       if (this.dashRemain > 0) _moveDirection.copy(this.dashDir);
-      this.vel.x = _moveDirection.x * speed;
-      this.vel.z = _moveDirection.z * speed;
+      if (this.dashRemain > 0) {
+        this.vel.x = _moveDirection.x * speed;
+        this.vel.z = _moveDirection.z * speed;
+      } else {
+        this.updateMomentum(dt, _moveDirection.x * speed, _moveDirection.z * speed, moving);
+      }
 
       var spaceDown = input.isDown('Space');
       var spacePressed = input.consumePressed('Space');
@@ -235,6 +246,32 @@ var _fwd = new THREE.Vector3();
       this.moveAxis('x', dt, world);
       this.moveAxis('z', dt, world);
       this.moveVertical(dt, world);
+    }
+
+    updateMomentum(dt, targetVX, targetVZ, moving) {
+      var accel;
+      if (!this.onGround) {
+        accel = moving ? PLAYER_AIR_ACCEL : PLAYER_AIR_FRICTION;
+      } else if (!moving) {
+        accel = PLAYER_GROUND_FRICTION;
+      } else if (this.stance === 'sprint') {
+        accel = PLAYER_SPRINT_ACCEL;
+      } else {
+        accel = PLAYER_ACCEL;
+      }
+
+      var dvx = targetVX - this.vel.x;
+      var dvz = targetVZ - this.vel.z;
+      var dv = Math.sqrt(dvx * dvx + dvz * dvz);
+      var maxDelta = accel * dt;
+      if (dv <= maxDelta || dv < 1e-6) {
+        this.vel.x = targetVX;
+        this.vel.z = targetVZ;
+        return;
+      }
+      var scale = maxDelta / dv;
+      this.vel.x += dvx * scale;
+      this.vel.z += dvz * scale;
     }
 
     updatePosture(input, world) {
@@ -317,6 +354,25 @@ var _fwd = new THREE.Vector3();
       amount = Number(amount);
       if (!isFinite(amount) || amount <= 0) return false;
       this.health = Math.max(0, this.health - amount);
+      return true;
+    }
+
+    // Apply at least `speed` of velocity directly away from the impact. The
+    // requested speed is divided by weight, so lighter bodies fly farther.
+    applyKnockback(dx, dz, speed) {
+      speed = Number(speed);
+      if (!isFinite(speed) || speed <= 0) return false;
+      var len = Math.sqrt(dx * dx + dz * dz);
+      if (len < 1e-6) return false;
+      var nx = dx / len;
+      var nz = dz / len;
+      var along = this.vel.x * nx + this.vel.z * nz;
+      var target = speed / this.weight;
+      if (along < target) {
+        var add = target - along;
+        this.vel.x += nx * add;
+        this.vel.z += nz * add;
+      }
       return true;
     }
 

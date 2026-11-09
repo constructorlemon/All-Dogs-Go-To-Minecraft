@@ -13,6 +13,7 @@
       this.pos = new THREE.Vector3();
       this.vel = new THREE.Vector3();
       this.halfExtents = opts.halfExtents || { x: 0.25, y: 0.5, z: 0.25 };
+      this.weight = typeof opts.weight === 'number' && opts.weight > 0 ? opts.weight : 1;
       this.alive = true;
       this.mesh = null;
       if (opts.pos) {
