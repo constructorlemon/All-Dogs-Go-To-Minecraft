@@ -53,6 +53,7 @@
   <script src="../js/world/drops.js"></script>
   <script src="../js/entity/entity.js"></script>
   <script src="../js/entity/pathfinder.js"></script>
+  <script src="../js/entity/goap.js"></script>
   <script src="../js/entity/mob.js"></script>
   <script src="../js/entity/mobCollision.js"></script>
   <script src="../js/entity/sign.js"></script>
@@ -450,10 +451,14 @@
         results.push('zombiesSpawned=' + zSpawned);
 
         var zEnt = g.entityManager.create('zombie', { pos: { x: 0.5, y: 20, z: 0.5 } });
+        var zBrain = zEnt ? zEnt.brain : null;
         var zOk = !!(zEnt && Math.abs(zEnt.height - 1.8) < 1e-6 &&
           Math.abs((zEnt.bounds.max.y - zEnt.bounds.min.y) - 1.8) < 1e-6 &&
           zEnt.mesh);
         results.push('zombieCreate=' + (zOk ? 1 : 0));
+        results.push('goap=' + (AllDogs.goap ? 1 : 0));
+        results.push('zombieGoap=' + (zSchema && zSchema.goap ? 1 : 0));
+        results.push('zombieBrain=' + (zBrain ? 1 : 0));
 
         var zbx = Math.floor(g.player.pos.x) + 12;
         var zbz = Math.floor(g.player.pos.z) - 12;
@@ -471,6 +476,9 @@
         results.push('astarPath=' + (zPath && zPath.length >= 2 ? 1 : 0) + ':' + (zPath ? zPath.length : -1));
 
         g.entityManager.add(zEnt);
+        // The legacy movement checks below exercise path following directly,
+        // so temporarily take the GOAP brain out of the steering path.
+        zEnt.brain = null;
         zEnt.pos.set(zbx + 0.5, zpy + 1, zbz + 0.5);
         zEnt.onGround = true;
         zEnt.path = zPath;
@@ -486,6 +494,12 @@
         for (var zm = 0; zm < 20; zm++) zEnt.update(0.05, zMock);
         results.push('mobMoved=' + (Math.abs(zEnt.pos.x - zmx) + Math.abs(zEnt.pos.z - zmz) > 0.1 ? 1 : 0));
         results.push('mobGrounded=' + (zEnt.onGround ? 1 : 0));
+
+        zEnt.moveTo(zEnt.pos.x + 0.4, zEnt.pos.y, zEnt.pos.z, { radius: 1.2 });
+        results.push('mobNav=' + (zEnt.nav.active && zEnt.navTarget &&
+          zEnt.nav.distance < 1.2 ? 1 : 0));
+        zEnt.stopMoving();
+        results.push('mobNavStop=' + (!zEnt.nav.active && !zEnt.navTarget ? 1 : 0));
 
         // A staircase-shaped path across open ground should be string-pulled
         // into a diagonal heading instead of steering along each cell edge.
@@ -503,7 +517,59 @@
         zEnt._steerTimer = 0;
         var zNav = zEnt.followPath(g.world);
         results.push('mobSmooth=' + (zNav && Math.abs(zNav.dx) > 0.5 && Math.abs(zNav.dz) > 0.5 ? 1 : 0));
+
+        // --- GOAP planner, idle fast path, and 1000-brain benchmark --------
+        zEnt.brain = zBrain;
+        var zMockGoap = { player: { pos: { x: 120.5, y: 30, z: 120.5 } } };
+        var zFacts = zSchema.goap.facts(zEnt, zMockGoap);
+        var zGoal = zSchema.goap.goals[0];
+        var zPlan = AllDogs.goap.plan(zSchema.goap, zFacts, zEnt, zMockGoap, { goal: zGoal });
+        results.push('goapZombiePlan=' + (zPlan && zPlan.length >= 2 ? 1 : 0) +
+          ':' + (zPlan ? zPlan.length : -1));
+
+        var benchDef = AllDogs.goap.define('__smoke_bench', {
+          idleTicks: 60,
+          idleJitter: 0,
+          facts: function () { return { a: false, b: false }; },
+          goals: [{ name: 'bench', priority: 1, desired: { b: true } }],
+          actions: [
+            { name: 'stepA', pre: { a: false }, effects: { a: true }, instant: true,
+              run: function () { return true; } },
+            { name: 'stepB', pre: { a: true }, effects: { b: true }, instant: true,
+              run: function () { return true; } }
+          ]
+        });
+        var benchGoal = benchDef.goals[0];
+        var benchPlan = AllDogs.goap.plan(benchDef, { a: false, b: false }, null, null,
+          { goal: benchGoal });
+        results.push('goapPlan=' + (benchPlan && benchPlan.length === 2 ? 1 : 0));
+
+        var benchBrains = [];
+        for (var bb = 0; bb < 1000; bb++) {
+          var benchBrain = AllDogs.goap.createBrain(
+            { id: bb, stopMoving: function () {} }, benchDef
+          );
+          benchBrain.pauseTicks = 60;
+          benchBrains.push(benchBrain);
+        }
+        var idleStart = (performance || Date).now();
+        for (var ib = 0; ib < benchBrains.length; ib++) {
+          benchBrains[ib].update(0.016, null);
+        }
+        var idleMs = (performance || Date).now() - idleStart;
+        results.push('goapIdle1000=' + idleMs.toFixed(2) + 'ms');
+        results.push('goapIdleOk=' + (idleMs < 50 ? 1 : 0));
+
+        var planStart = (performance || Date).now();
+        for (var bp = 0; bp < 1000; bp++) {
+          AllDogs.goap.plan(benchDef, { a: false, b: false }, null, null,
+            { goal: benchGoal });
+        }
+        var benchMs = (performance || Date).now() - planStart;
+        results.push('goapPlan1000=' + benchMs.toFixed(1) + 'ms');
+
         g.entityManager.remove(zEnt);
+        if (zBrain) zBrain.stop();
 
         // --- Mob / player rigid-body separation ---------------------------
         function overlapsXZ(a, b) {

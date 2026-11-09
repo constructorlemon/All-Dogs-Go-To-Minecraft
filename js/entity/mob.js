@@ -80,6 +80,18 @@
       this.pathCooldown = Math.random() * this.pathInterval;
       this.pathQueued = false;
 
+      // Navigation intent. Legacy schemas drive the mob through `target`; GOAP
+      // schemas call moveTo/stopMoving and let their actions read nav.arrived.
+      this.nav = {
+        active: false,
+        x: 0, y: 0, z: 0,
+        radius: this.stopDistance,
+        distance: Infinity,
+        arrived: false
+      };
+      this.navTarget = null;
+      this.brain = null;
+
       this.onGround = false;
       this.hurtTime = 0;
       this.deadTime = 0;
@@ -96,6 +108,13 @@
       this._steerTimer = 0;
       this._losClear = false;
       this._losTimer = 0;
+
+      // GOAP is opt-in. Schemas without `goap` keep using target/tick exactly
+      // as before; schemas with it get a reusable brain and navigation API.
+      if (schema && schema.goap && AllDogs.goap && AllDogs.goap.createBrain) {
+        try { this.brain = AllDogs.goap.createBrain(this, schema.goap); }
+        catch (err) { this.brain = null; }
+      }
 
       var mesh = null;
       if (schema && typeof schema.buildMesh === 'function') {
@@ -166,6 +185,55 @@
       this.onGround = false;
       this._jumpLock = 0.15;
       return true;
+    }
+
+    // Navigation API used by GOAP actions and other behavior code. moveTo is
+    // intentionally cheap: it only records the intent and lets the normal mob
+    // update reuse the existing A* and direct-chase steering.
+    moveTo(x, y, z, opts) {
+      x = Number(x);
+      y = Number(y);
+      z = Number(z);
+      if (!isFinite(x) || !isFinite(y) || !isFinite(z)) return false;
+      opts = opts || {};
+      var radius = Number(opts.radius);
+      if (!isFinite(radius) || radius < 0) radius = this.stopDistance;
+
+      this.navTarget = { x: x, y: y, z: z };
+      this.nav.active = true;
+      this.nav.x = x;
+      this.nav.y = y;
+      this.nav.z = z;
+      this.nav.radius = radius;
+      this.nav.arrived = false;
+      var dx = x - this.pos.x;
+      var dz = z - this.pos.z;
+      this.nav.distance = Math.sqrt(dx * dx + dz * dz);
+
+      if (opts.resetPath) {
+        this.path = null;
+        this.pathIndex = 0;
+        this.pathGoal = null;
+        this.pathCooldown = 0;
+      }
+      return true;
+    }
+
+    stopMoving() {
+      this.navTarget = null;
+      this.nav.active = false;
+      this.nav.arrived = false;
+      this.nav.distance = Infinity;
+      this.path = null;
+      this.pathIndex = 0;
+      this.pathGoal = null;
+      this.pathCooldown = 0;
+      this.vel.x = 0;
+      this.vel.z = 0;
+    }
+
+    isNavigating() {
+      return !!(this.nav.active && this.navTarget);
     }
 
     moveAxis(axis, delta, world) {
@@ -340,14 +408,22 @@
       this.pathAge += dt;
       if (this.pathCooldown > 0) this.pathCooldown = Math.max(0, this.pathCooldown - dt);
 
-      var target = this.resolveTarget(game);
-      if (this.schema && typeof this.schema.tick === 'function') {
+      // Brains run before steering so an action can set the navigation target
+      // for this same frame. A paused brain returns immediately, which is the
+      // cheap idle path for large populations.
+      if (this.brain) {
+        try { this.brain.update(dt, game); } catch (err) {}
+      }
+
+      var target = this.brain ? this.navTarget : this.resolveTarget(game);
+      if (!this.brain && this.schema && typeof this.schema.tick === 'function') {
         try { this.schema.tick(this, dt, game, target); } catch (err) {}
       }
 
       var dirX = 0;
       var dirZ = 0;
       var wantJump = false;
+      var stopDistance = this.nav.active ? this.nav.radius : this.stopDistance;
 
       if (target) {
         if (this.pathCooldown <= 0 && !this.pathQueued) this.requestPath(target);
@@ -355,6 +431,8 @@
         var tx = target.x - this.pos.x;
         var tz = target.z - this.pos.z;
         var dist = Math.sqrt(tx * tx + tz * tz);
+        this.nav.distance = dist;
+        this.nav.arrived = !!(this.nav.active && dist <= stopDistance);
 
         // A visible target can be chased in a straight line and is much less
         // prone to the side-to-side correction a grid path causes. The LOS
@@ -370,7 +448,7 @@
         }
 
         if (direct) {
-          if (dist > this.stopDistance && dist > 1e-5) {
+          if (dist > stopDistance && dist > 1e-5) {
             dirX = tx / dist;
             dirZ = tz / dist;
           }
@@ -395,6 +473,9 @@
         if (dirX !== 0 || dirZ !== 0) {
           this.yaw = Math.atan2(dirX, dirZ);
         }
+      } else if (this.nav.active) {
+        this.nav.distance = Infinity;
+        this.nav.arrived = false;
       }
 
       this.vel.x = dirX * this.speed;
@@ -427,6 +508,7 @@
       this.alive = false;
       this.path = null;
       this.pathQueued = false;
+      if (this.brain) this.brain.stop();
       if (this.schema && typeof this.schema.onDeath === 'function') {
         try { this.schema.onDeath(this, source); } catch (err) {}
       }
@@ -446,6 +528,10 @@
 
     onRemoved(manager) {
       this.pathQueued = false;
+      if (this.brain) {
+        this.brain.stop();
+        this.brain = null;
+      }
       if (this.schema && typeof this.schema.onRemoved === 'function') {
         try { this.schema.onRemoved({ entity: this, manager: manager }); } catch (err) {}
       }
