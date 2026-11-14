@@ -264,6 +264,10 @@
         self.viewport.setPreview(this.checked);
       });
 
+      $('mesh-show-joints').addEventListener('change', function () {
+        self.viewport.setShowJoints(this.checked);
+      });
+
       $('mesh-frame-all').addEventListener('click', function () { self.viewport.frameAll(); });
       $('mesh-reset-view').addEventListener('click', function () { self.resetView(); });
       $('mesh-new').addEventListener('click', function () { self.clearMesh(); });

@@ -37,7 +37,7 @@
             <button class="mod-tool-btn" data-mesh-tool="rotate">Rotate</button>
             <button class="mod-tool-btn" data-mesh-tool="scale">Scale</button>
           </div>
-          <div class="mod-note">Click a part to select it. With Move, Rotate or Scale selected, drag the part. Hold Shift while moving for vertical motion. Right-drag orbits; middle-drag pans; the wheel zooms.</div>
+          <div class="mod-note">Click a part to select it. With Move or Scale selected, drag a coloured axis handle (red X, green Y, blue Z) to constrain to that axis. Hold Shift while dragging a scale handle for uniform scaling. With Rotate selected, drag the part; hold Shift to lock rotation to the axis of the face you grab. Right-drag orbits; middle-drag pans; the wheel zooms.</div>
         </div>
 
         <div class="mod-tool-group">
@@ -77,6 +77,7 @@
 
         <div class="mod-tool-group">
           <label class="mod-toggle"><input id="mesh-preview" type="checkbox" /> Preview joint animation</label>
+          <label class="mod-toggle"><input id="mesh-show-joints" type="checkbox" checked /> Show joint helpers</label>
           <div class="mod-tools-row">
             <button id="mesh-frame-all" class="mod-act-btn">Frame all</button>
             <button id="mesh-reset-view" class="mod-act-btn">Reset view</button>
