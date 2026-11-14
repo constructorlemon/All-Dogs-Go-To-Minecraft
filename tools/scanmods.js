@@ -118,7 +118,19 @@ function listFiles(dir, pred) {
     var full = path.join(dir, names[i]);
     if (names[i].charAt(0) === '.') continue;
     if (!fs.statSync(full).isFile()) continue;
-    if (pred(names[i])) out.push(names[i]);
+    if (!pred || pred(names[i])) out.push(names[i]);
+  }
+  return out;
+}
+
+function listDirs(dir) {
+  if (!fs.existsSync(dir)) return [];
+  var out = [];
+  var names = fs.readdirSync(dir).sort();
+  for (var i = 0; i < names.length; i++) {
+    if (names[i].charAt(0) === '.') continue;
+    var full = path.join(dir, names[i]);
+    if (fs.statSync(full).isDirectory()) out.push(names[i]);
   }
   return out;
 }
@@ -149,7 +161,41 @@ listFiles(mobDir, function (f) { return /\.json$/i.test(f); }).forEach(function 
   mobs.push({ file: f, name: path.basename(f, '.json'), kind: 'json', path: rel('mobs', f) });
 });
 
-if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-fs.writeFileSync(outFile, 'window.MOD_MANIFEST = ' + JSON.stringify({ textures: textures, mobs: mobs }) + ';\n');
+// Mesh exports are directories: mods/mobs/<name>/model.json + texture.png.
+// The model JSON and the PNG are embedded in the manifest so the game can load
+// them without fetch() on file:// URLs.
+var meshes = [];
+listDirs(mobDir).forEach(function (dir) {
+  var bundle = path.join(mobDir, dir);
+  var modelPath = path.join(bundle, 'model.json');
+  var texturePath = path.join(bundle, 'texture.png');
+  if (!fs.existsSync(modelPath)) return;
+  if (!fs.existsSync(texturePath)) {
+    console.warn('skip mesh ' + dir + ': missing texture.png');
+    return;
+  }
+  try {
+    var model = JSON.parse(fs.readFileSync(modelPath, 'utf8'));
+    if (!model || !Array.isArray(model.parts) || !model.parts.length) {
+      throw new Error('model has no parts');
+    }
+    var png = fs.readFileSync(texturePath);
+    // Validate that the writer can actually decode it; the game only needs the
+    // bytes, but a broken PNG would fail much later and be hard to diagnose.
+    decodePng(png);
+    meshes.push({
+      dir: dir,
+      name: model.name || dir,
+      path: rel('mobs', path.join(dir, 'model.json')),
+      model: model,
+      texture: png.toString('base64')
+    });
+  } catch (e) {
+    console.warn('skip mesh ' + dir + ': ' + e.message);
+  }
+});
 
-console.log('manifest: ' + textures.length + ' texture(s), ' + mobs.length + ' mob(s)');
+if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+fs.writeFileSync(outFile, 'window.MOD_MANIFEST = ' + JSON.stringify({ textures: textures, mobs: mobs, meshes: meshes }) + ';\n');
+
+console.log('manifest: ' + textures.length + ' texture(s), ' + mobs.length + ' mob(s), ' + meshes.length + ' mesh(es)');

@@ -1142,6 +1142,183 @@ body {
   padding: 2px 0;
 }
 
+/* Mesh editor */
+.mesh-mode-switch {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.mesh-header-status {
+  min-width: 210px;
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+  text-align: right;
+  opacity: 0.75;
+}
+
+.mesh-header-status.mesh-status-error {
+  color: #ff9b8a;
+  opacity: 1;
+}
+
+#mesh-editor {
+  display: flex;
+  height: calc(100% - 52px);
+  min-height: 0;
+}
+
+#mesh-tools {
+  width: 208px;
+  flex: 0 0 auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: rgba(0, 0, 0, 0.35);
+  border-right: 1px solid rgba(255, 255, 255, 0.15);
+  overflow-y: auto;
+}
+
+#mesh-tools [hidden],
+#mesh-side [hidden] {
+  display: none !important;
+}
+
+#mesh-stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  background: #2a2f36;
+  border-right: 1px solid rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+
+#mesh-stage canvas {
+  display: block;
+  touch-action: none;
+}
+
+#mesh-side {
+  width: 278px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.35);
+  overflow-y: auto;
+}
+
+#mesh-side section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.mesh-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mesh-section + .mesh-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 10px;
+}
+
+.mesh-section-title {
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.mesh-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 148px;
+  overflow-y: auto;
+}
+
+.mesh-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 3px;
+  padding: 4px 7px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.mesh-item:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.mesh-item.active {
+  background: rgba(127, 191, 69, 0.35);
+  border-color: #7fbf45;
+}
+
+.mesh-item-name {
+  font-size: 12px;
+}
+
+.mesh-item-meta {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.mesh-three {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mesh-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mesh-three .mod-text,
+.mesh-two .mod-text,
+.mesh-three .mod-select {
+  min-width: 0;
+}
+
+.mod-label-mini {
+  font-size: 11px;
+  margin-bottom: -3px;
+}
+
+#mesh-flat {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  image-rendering: pixelated;
+  background-color: #5a5f66;
+  background-image: linear-gradient(45deg, #3d4147 25%, transparent 25%, transparent 75%, #3d4147 75%),
+    linear-gradient(45deg, #3d4147 25%, transparent 25%, transparent 75%, #3d4147 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 6px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+#mesh-export .mod-act-btn,
+#mesh-export-panel .mod-act-btn {
+  width: 100%;
+}
+
 #controls {
   padding: 24px;
   display: flex;
@@ -1233,6 +1410,28 @@ body {
   min-height: 16px;
   font-size: 12px;
   opacity: 0.75;
+}
+
+.pause-meshes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 210px;
+  padding-top: 8px;
+  margin-top: 2px;
+  overflow-y: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.pause-meshes[hidden] {
+  display: none;
+}
+
+.pause-mesh-title {
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.6;
 }
 
 #worlds {

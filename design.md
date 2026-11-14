@@ -259,9 +259,22 @@ Filename suffixes define block orientation:
 
 The editor tells the user to put the PNG in `mods/texture` and run `node tools/scanmods.js`.
 
+### Mesh editor
+
+`mod_meshes.html` is a 3D editor for mobs and custom static entities. `js/mod/meshModel.js` owns the scene contract: named `box` (rectangular prism) and `plane` parts with arbitrary size, position, and rotation; optional anchored parts; and joints. A model's origin is the feet centre (`y = 0` at the bottom) to match `Entity.pos`.
+
+- **Anchored parts** are fitted to the hitbox and never animate. They are always rig roots and cannot be joint children.
+- **Connecting joints** take a parent and a child and pivot between the nearest surfaces of the two parts. Moving the parent moves the pivot with it.
+- **Floating joints** attach a child to a point in space. The pivot defaults to the child's centre and is editable.
+- Joints animate on a sine wave and store `axis`, `amplitude` (degrees), `speed`, and `phase` (degrees). A preview toggle animates the editor rig.
+
+`js/mod/meshViewport.js` renders the rig with Three.js, handles orbit/pan/zoom, click selection, drag move/rotate/scale, paint raycasts, hitbox/selection helpers, and the animation loop. `js/mod/meshEditor.js` wires the UI: starter model, part/joint lists and inspectors, add/duplicate/delete, hitbox fields, fit-to-hitbox, model/paint mode switch, and ZIP export.
+
+All scene faces share one 1024×1024 atlas of fixed 32×32 tiles (32×32 slots, 1024 faces maximum). Each box owns six stable slots and each plane one. `js/mod/paintTools.js` provides the block editor's toolset on that atlas: brush, grain/texture, eraser, fill, pick, circle, square, blend modes, undo/redo, and slot fill/copy. In paint mode the same tools paint either the visible 3D face or the flat atlas map, and the drawing tools are hidden in model mode.
+
 ### Manifest and runtime registration
 
-`tools/scanmods.js` scans PNG files, decodes supported 8-bit PNG color types, slices the six atlas faces, and writes `js/mods/manifest.js`. It also lists JSON files in `mods/mobs`, although the current browser loader does not instantiate mob definitions.
+`tools/scanmods.js` scans PNG files, decodes supported 8-bit PNG color types, slices the six atlas faces, and writes `js/mods/manifest.js`. It also lists JSON files in `mods/mobs` and scans mesh bundles: each directory under `mods/mobs` containing `model.json` and `texture.png` is embedded as model JSON plus a base64 PNG, so the game never needs `fetch()` on `file://`.
 
 `js/mods/modLoader.js` processes the manifest sequentially before game boot. It loads embedded face data or image paths, registers dynamic block IDs/items/textures/icons, and optionally loads `mods/schema/<name>.js`. A schema is exposed through a temporary `module.exports` bridge. A block schema can provide:
 
@@ -270,9 +283,11 @@ The editor tells the user to put the PNG in `mods/texture` and run `node tools/s
 - `onPlace` and `onDestroy` hooks;
 - `craftingRecipe` as an extension field (not currently consumed by the built-in crafting resolver).
 
-The loader also registers built-in entity schemas. `Chest.js` is loaded for the `chest` entity type and owns its 27-slot inventories, interaction, quick-move handling, destroy/drop behavior, and save/load helpers. Entity schemas use hooks such as `onSpawn`, `onInteract`, and `onDestroy`. `AllDogs.entitySchemas` is the entity-schema registry, mirroring the block schema registry.
+The loader also registers built-in entity schemas. `Chest.js` is loaded for the `chest` entity type and owns its 27-slot inventories, interaction, quick-move handling, destroy/drop behavior, and save/load helpers. Entity schemas use hooks such as `onSpawn`, `onInteract`, and `onDestroy`. `AllDogs.entitySchemas` is the entity-schema registry, mirroring the block schema registry. Mesh bundles are registered last so they can inherit a built-in AI schema. `js/mods/meshFactory.js` builds the runtime rig from model space, remaps per-face UVs into the shared atlas, and registers `mesh_<slug>` entity types. Mobs copy `mob`, `goap`, and behavior hooks from the selected built-in schema (`js/mods/meshAI.js` lists the choices; currently zombie), register a generated schema, and animate their rig each frame. Static meshes may be solid, which adds a world collider. Loaded meshes appear as spawn buttons in the pause menu.
 
-The current checked-in examples include furnace, transparent, and rotated test textures. `mod_meshes.html` is currently only a placeholder page.
+The editor exports `<name>.zip` containing `<name>/model.json`, `<name>/texture.png`, and `<name>/README.txt` using the store-only writer in `js/mod/zip.js`. Unzipping that folder into `mods/mobs` and running `node tools/scanmods.js` makes it available in-game.
+
+The current checked-in examples include furnace, transparent, and rotated test textures.
 
 ## 11. Testing and diagnostics
 

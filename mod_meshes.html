@@ -1,11 +1,304 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mod Meshes</title>
+  <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <a href="game.html">Back to game</a>
+  <header id="mod-header">
+    <a href="game.html">Back to game</a>
+    <h1>Mesh Editor</h1>
+    <div id="mesh-mode-switch" class="mesh-mode-switch">
+      <button class="mod-tool-btn active" data-mesh-mode="model">Model</button>
+      <button class="mod-tool-btn" data-mesh-mode="paint">Paint</button>
+    </div>
+    <div id="mesh-header-status" class="mesh-header-status"></div>
+  </header>
+
+  <div id="mesh-editor">
+    <aside id="mesh-tools">
+      <div id="mesh-model-tools">
+        <div class="mod-tool-group">
+          <label class="mod-label">Add part</label>
+          <div class="mod-tools-row">
+            <button id="mesh-add-box" class="mod-tool-btn">Box</button>
+            <button id="mesh-add-plane" class="mod-tool-btn">Plane</button>
+          </div>
+          <div class="mod-note">Boxes are rectangular prisms. Planes are flat, double-sided quads. Both can be any size.</div>
+        </div>
+
+        <div class="mod-tool-group">
+          <label class="mod-label">Edit tool</label>
+          <div class="mod-tools-row" id="mesh-edit-tools">
+            <button class="mod-tool-btn active" data-mesh-tool="select">Select</button>
+            <button class="mod-tool-btn" data-mesh-tool="move">Move</button>
+            <button class="mod-tool-btn" data-mesh-tool="rotate">Rotate</button>
+            <button class="mod-tool-btn" data-mesh-tool="scale">Scale</button>
+          </div>
+          <div class="mod-note">Click a part to select it. With Move, Rotate or Scale selected, drag the part. Hold Shift while moving for vertical motion. Right-drag orbits; middle-drag pans; the wheel zooms.</div>
+        </div>
+
+        <div class="mod-tool-group">
+          <label class="mod-label">Selected part</label>
+          <div class="mod-tools-row">
+            <button id="mesh-duplicate" class="mod-act-btn">Duplicate</button>
+            <button id="mesh-delete-part" class="mod-act-btn">Delete</button>
+          </div>
+          <div class="mod-note">Anchored parts can be fitted to the hitbox and never move with joints.</div>
+        </div>
+
+        <div class="mod-tool-group">
+          <label class="mod-label">Add joint</label>
+          <label class="mod-label mod-label-mini" for="mesh-joint-parent">Parent</label>
+          <select id="mesh-joint-parent" class="mod-select"></select>
+          <label class="mod-label mod-label-mini" for="mesh-joint-child">Child</label>
+          <select id="mesh-joint-child" class="mod-select"></select>
+          <div class="mesh-two">
+            <label class="mod-label" for="mesh-joint-axis">Axis
+              <select id="mesh-joint-axis" class="mod-select">
+                <option value="x">X</option>
+                <option value="y" selected>Y</option>
+                <option value="z">Z</option>
+              </select>
+            </label>
+            <label class="mod-label" for="mesh-joint-amplitude">Amplitude &deg;
+              <input id="mesh-joint-amplitude" class="mod-text" type="number" value="15" step="1" />
+            </label>
+          </div>
+          <label class="mod-label" for="mesh-joint-speed">Speed
+            <input id="mesh-joint-speed" class="mod-text" type="number" value="1.2" step="0.1" />
+          </label>
+          <button id="mesh-add-connecting" class="mod-tool-btn">Connect two parts</button>
+          <button id="mesh-add-floating" class="mod-tool-btn">Float child in space</button>
+          <div class="mod-note">Connecting joins the child at the nearest point between the two surfaces. Floating anchors the child to a point in space; its pivot defaults to the child's center and can be edited below.</div>
+        </div>
+
+        <div class="mod-tool-group">
+          <label class="mod-toggle"><input id="mesh-preview" type="checkbox" /> Preview joint animation</label>
+          <div class="mod-tools-row">
+            <button id="mesh-frame-all" class="mod-act-btn">Frame all</button>
+            <button id="mesh-reset-view" class="mod-act-btn">Reset view</button>
+          </div>
+        </div>
+
+        <div class="mod-tool-group">
+          <button id="mesh-new" class="mod-act-btn">Clear mesh</button>
+        </div>
+      </div>
+
+      <div id="mesh-paint-tools" hidden>
+        <div class="mod-tool-group">
+          <label class="mod-label" for="mesh-color">Brush color</label>
+          <input type="color" id="mesh-color" value="#8b5a2b" />
+        </div>
+
+        <div class="mod-tool-group">
+          <label class="mod-label" for="mesh-size">Brush size <span id="mesh-size-label">2</span></label>
+          <input type="range" id="mesh-size" min="1" max="8" value="2" />
+        </div>
+
+        <div class="mod-tool-group">
+          <label class="mod-label" for="mesh-grain">Grain density <span id="mesh-grain-label">70%</span></label>
+          <input type="range" id="mesh-grain" min="10" max="100" value="70" />
+        </div>
+
+        <div class="mod-tool-group">
+          <label class="mod-label" for="mesh-blend">Blend mode</label>
+          <select id="mesh-blend" class="mod-select">
+            <option value="normal">Normal</option>
+            <option value="multiply">Multiply</option>
+            <option value="lighten">Lighten</option>
+            <option value="darken">Darken</option>
+          </select>
+        </div>
+
+        <div class="mod-tool-group mod-tools-row" id="mesh-paint-buttons">
+          <button class="mod-tool-btn active" data-paint-tool="brush" title="Paint">Brush</button>
+          <button class="mod-tool-btn" data-paint-tool="texture" title="Paint with grain">Texture</button>
+          <button class="mod-tool-btn" data-paint-tool="eraser" title="Erase to transparent">Eraser</button>
+          <button class="mod-tool-btn" data-paint-tool="fill" title="Fill a face region">Fill</button>
+          <button class="mod-tool-btn" data-paint-tool="pick" title="Pick a color">Pick</button>
+          <button class="mod-tool-btn" data-paint-tool="circle" title="Draw a circle">Circle</button>
+          <button class="mod-tool-btn" data-paint-tool="square" title="Draw a square">Square</button>
+        </div>
+
+        <div class="mod-tool-group">
+          <label class="mod-label">Shape style</label>
+          <div class="mod-tools-row">
+            <button id="mesh-shape-fill" class="mod-tool-btn active">Filled</button>
+            <button id="mesh-shape-outline" class="mod-tool-btn">Outline</button>
+          </div>
+        </div>
+
+        <div class="mod-tool-group mod-tools-row">
+          <button id="mesh-paint-undo" class="mod-act-btn" disabled>Undo</button>
+          <button id="mesh-paint-redo" class="mod-act-btn" disabled>Redo</button>
+        </div>
+
+        <div class="mod-tool-group">
+          <button id="mesh-paint-clear" class="mod-act-btn">Clear texture</button>
+        </div>
+
+        <div class="mod-tool-group">
+          <div class="mod-note">Paint tools only appear in this mode. The model is still fully 3D: click any visible face to paint its tile. Right-drag orbits without painting.</div>
+        </div>
+      </div>
+    </aside>
+
+    <div id="mesh-stage"></div>
+
+    <aside id="mesh-side">
+      <section id="mesh-model-panel">
+        <div class="mesh-section">
+          <div class="mesh-section-title">Hitbox</div>
+          <div class="mesh-three">
+            <label class="mod-label">Width
+              <input id="mesh-hb-w" class="mod-text" type="number" min="0.05" step="0.05" />
+            </label>
+            <label class="mod-label">Height
+              <input id="mesh-hb-h" class="mod-text" type="number" min="0.05" step="0.05" />
+            </label>
+            <label class="mod-label">Depth
+              <input id="mesh-hb-d" class="mod-text" type="number" min="0.05" step="0.05" />
+            </label>
+          </div>
+          <div class="mod-note">The hitbox is centred on X/Z and grows upward from the feet at Y = 0. Anchored parts can be fitted to it exactly.</div>
+        </div>
+
+        <div class="mesh-section">
+          <div class="mesh-section-title">Parts</div>
+          <div id="mesh-parts-list" class="mesh-list"></div>
+        </div>
+
+        <div class="mesh-section">
+          <div class="mesh-section-title">Part properties</div>
+          <div id="mesh-part-empty" class="mod-note">Select a part to edit it.</div>
+          <div id="mesh-part-fields" hidden>
+            <label class="mod-label">Name
+              <input id="mesh-part-name" class="mod-text" type="text" spellcheck="false" />
+            </label>
+            <div class="mesh-three">
+              <label class="mod-label">Size X
+                <input id="mesh-part-sx" class="mod-text" type="number" min="0.01" step="0.05" />
+              </label>
+              <label class="mod-label">Size Y
+                <input id="mesh-part-sy" class="mod-text" type="number" min="0.01" step="0.05" />
+              </label>
+              <label class="mod-label">Size Z
+                <input id="mesh-part-sz" class="mod-text" type="number" min="0.01" step="0.05" />
+              </label>
+            </div>
+            <div class="mesh-three">
+              <label class="mod-label">Pos X
+                <input id="mesh-part-px" class="mod-text" type="number" step="0.05" />
+              </label>
+              <label class="mod-label">Pos Y
+                <input id="mesh-part-py" class="mod-text" type="number" step="0.05" />
+              </label>
+              <label class="mod-label">Pos Z
+                <input id="mesh-part-pz" class="mod-text" type="number" step="0.05" />
+              </label>
+            </div>
+            <div class="mesh-three">
+              <label class="mod-label">Rot X
+                <input id="mesh-part-rx" class="mod-text" type="number" step="5" />
+              </label>
+              <label class="mod-label">Rot Y
+                <input id="mesh-part-ry" class="mod-text" type="number" step="5" />
+              </label>
+              <label class="mod-label">Rot Z
+                <input id="mesh-part-rz" class="mod-text" type="number" step="5" />
+              </label>
+            </div>
+            <label class="mod-toggle"><input id="mesh-part-anchored" type="checkbox" /> Anchored (fixed to hitbox)</label>
+            <div class="mesh-two">
+              <button id="mesh-fit-hitbox" class="mod-act-btn">Fit hitbox</button>
+              <button id="mesh-delete-part2" class="mod-act-btn">Delete</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="mesh-section">
+          <div class="mesh-section-title">Joints</div>
+          <div id="mesh-joints-list" class="mesh-list"></div>
+        </div>
+
+        <div class="mesh-section">
+          <div class="mesh-section-title">Joint properties</div>
+          <div id="mesh-joint-empty" class="mod-note">Select a joint to edit it.</div>
+          <div id="mesh-joint-fields" hidden>
+            <div id="mesh-joint-summary" class="mod-note"></div>
+            <div class="mesh-three">
+              <label class="mod-label">Pivot X
+                <input id="mesh-joint-px" class="mod-text" type="number" step="0.05" />
+              </label>
+              <label class="mod-label">Pivot Y
+                <input id="mesh-joint-py" class="mod-text" type="number" step="0.05" />
+              </label>
+              <label class="mod-label">Pivot Z
+                <input id="mesh-joint-pz" class="mod-text" type="number" step="0.05" />
+              </label>
+            </div>
+            <div class="mesh-three">
+              <label class="mod-label">Axis
+                <select id="mesh-joint-edit-axis" class="mod-select">
+                  <option value="x">X</option>
+                  <option value="y">Y</option>
+                  <option value="z">Z</option>
+                </select>
+              </label>
+              <label class="mod-label">Amplitude &deg;
+                <input id="mesh-joint-edit-amplitude" class="mod-text" type="number" step="1" />
+              </label>
+              <label class="mod-label">Speed
+                <input id="mesh-joint-edit-speed" class="mod-text" type="number" step="0.1" />
+              </label>
+            </div>
+            <button id="mesh-delete-joint" class="mod-act-btn">Delete joint</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="mesh-paint-panel" hidden>
+        <div class="mesh-section-title">Texture atlas</div>
+        <canvas id="mesh-flat" class="mesh-flat"></canvas>
+        <div id="mesh-paint-status" class="mod-note"></div>
+        <div class="mod-note">Every face owns one 32&times;32 tile in a shared 1024&times;1024 atlas. Clicking the model or this flat map paints the matching tile.</div>
+        <div class="mod-note">Eraser pixels are transparent, so erased areas become holes in the model.</div>
+      </section>
+
+      <section id="mesh-export-panel">
+        <div class="mesh-section">
+          <div class="mesh-section-title">Export</div>
+          <label class="mod-label">Name
+            <input id="mesh-name" class="mod-text" type="text" spellcheck="false" autocomplete="off" />
+          </label>
+          <label class="mod-label" for="mesh-kind">Entity type</label>
+          <select id="mesh-kind" class="mod-select">
+            <option value="mob">Mob</option>
+            <option value="static">Static entity</option>
+          </select>
+          <div id="mesh-ai-row">
+            <label class="mod-label" for="mesh-ai">Inherited AI</label>
+            <select id="mesh-ai" class="mod-select"></select>
+          </div>
+          <label class="mod-toggle" id="mesh-solid-row" hidden><input id="mesh-solid" type="checkbox" /> Solid (blocks movement)</label>
+          <button id="mesh-export" class="mod-act-btn">Export ZIP</button>
+          <div class="mod-note">Exports <code id="mesh-export-name">my_mesh.zip</code>. Unzip it into <code>mods/mobs</code>, then run <code>node tools/scanmods.js</code>.</div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <script src="lib/three.min.js"></script>
+  <script src="js/mods/meshAI.js"></script>
+  <script src="js/mods/meshFactory.js"></script>
+  <script src="js/mod/paintTools.js"></script>
+  <script src="js/mod/meshModel.js"></script>
+  <script src="js/mod/meshViewport.js"></script>
+  <script src="js/mod/zip.js"></script>
+  <script src="js/mod/meshEditor.js"></script>
 </body>
 </html>

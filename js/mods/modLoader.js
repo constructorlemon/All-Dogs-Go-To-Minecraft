@@ -110,6 +110,28 @@
     });
   }
 
+  function textureFromBase64(b64) {
+    return loadImage('data:image/png;base64,' + b64).then(function (img) {
+      var THREE = window.THREE;
+      var texture = new THREE.Texture(img);
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.needsUpdate = true;
+      return texture;
+    });
+  }
+
+  function registerMesh(entry) {
+    if (!AllDogs.meshFactory || !AllDogs.meshFactory.register) return Promise.resolve(false);
+    if (!entry || !entry.model || !entry.texture) return Promise.resolve(false);
+    return textureFromBase64(entry.texture).then(function (texture) {
+      AllDogs.meshFactory.register(entry.model, texture, { name: entry.name || entry.dir });
+      return true;
+    });
+  }
+
   var BUILTIN_ENTITY_SCHEMAS = [
     { type: 'chest', name: 'Chest' },
     { type: 'zombie', name: 'Zombie' }
@@ -119,6 +141,7 @@
     var self = this;
     this.textures = 0;
     this.mobs = 0;
+    this.meshes = 0;
     this.failed = 0;
     this.ready = this.scan().catch(function () {}).then(function () { return self; });
   }
@@ -156,6 +179,22 @@
           });
         };
       })(BUILTIN_ENTITY_SCHEMAS[s]));
+    }
+    // Mesh bundles inherit from the built-in schemas above, so they must be
+    // registered last.
+    if (manifest && manifest.meshes) {
+      for (var m = 0; m < manifest.meshes.length; m++) {
+        chain = chain.then((function (entry) {
+          return function () {
+            return registerMesh(entry)
+              .then(function (ok) {
+                if (ok) self.meshes++;
+                else self.failed++;
+              })
+              .catch(function () { self.failed++; });
+          };
+        })(manifest.meshes[m]));
+      }
     }
     return chain;
   };
