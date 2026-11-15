@@ -253,6 +253,10 @@
         });
       });
 
+      $('mesh-rotate-space').addEventListener('change', function () {
+        self.viewport.setRotateSpace(this.value);
+      });
+
       $('mesh-duplicate').addEventListener('click', function () { self.duplicateSelected(); });
       $('mesh-delete-part').addEventListener('click', function () { self.deleteSelected(); });
       $('mesh-delete-part2').addEventListener('click', function () { self.deleteSelected(); });
@@ -572,6 +576,10 @@
       if (!this.selectedJoint) return;
       var joint = this.model.getJoint(this.selectedJoint);
       if (!joint) return;
+      if (target && target.id === 'mesh-joint-name') {
+        this.model.updateJoint(joint.id, { name: target.value });
+        return;
+      }
       this.model.updateJoint(joint.id, {
         pivot: {
           x: readNum($('mesh-joint-px'), joint.pivot.x),
@@ -694,12 +702,14 @@
 
         var name = document.createElement('span');
         name.className = 'mesh-item-name';
-        name.textContent = (parent ? parent.name : 'World') + ' \u2192 ' + (child ? child.name : joint.child);
+        name.textContent = joint.name ||
+          ((parent ? parent.name : 'World') + ' \u2192 ' + (child ? child.name : joint.child));
         row.appendChild(name);
 
         var meta = document.createElement('span');
         meta.className = 'mesh-item-meta';
-        meta.textContent = joint.type + ' · ' + joint.axis + ' · ' +
+        meta.textContent = (parent ? parent.name : 'World') + ' \u2192 ' + (child ? child.name : joint.child) +
+          ' · ' + joint.type + ' · ' + joint.axis + ' · ' +
           round(joint.amplitude) + '\u00b0 @ ' + round(joint.speed);
         row.appendChild(meta);
 
@@ -745,6 +755,9 @@
         ' (' + joint.type + ')';
       $('mesh-joint-summary').textContent = summary;
 
+      if (document.activeElement !== $('mesh-joint-name')) {
+        $('mesh-joint-name').value = joint.name || '';
+      }
       setInput($('mesh-joint-px'), joint.pivot.x);
       setInput($('mesh-joint-py'), joint.pivot.y);
       setInput($('mesh-joint-pz'), joint.pivot.z);
@@ -870,19 +883,29 @@
 
       var folder = sanitizeName(this.model.name, 'mesh');
       model.name = folder;
+      var partName = {};
+      model.parts.forEach(function (p) { partName[p.id] = p.name; });
+      var jointLines = model.joints.map(function (j) {
+        return '  - ' + (j.name || j.id) + ': ' +
+          (j.parent ? (partName[j.parent] || j.parent) : 'World') + ' -> ' +
+          (partName[j.child] || j.child) +
+          ' (' + j.type + ', ' + j.axis + ' axis)';
+      });
       var readme = [
         'All Dogs Go To Minecraft mesh export',
         '',
         'Name: ' + folder,
         'Type: ' + model.kind + (model.kind === 'mob' ? ' (AI: ' + model.ai + ')' : ''),
         'Hitbox: ' + round(model.hitbox.width) + ' x ' + round(model.hitbox.height) + ' x ' + round(model.hitbox.depth),
+        'Joints: ' + model.joints.length,
+      ].concat(jointLines.length ? jointLines : ['  (none)']).concat([
         '',
         'To install:',
         '1. Unzip the "' + folder + '" folder into mods/mobs/.',
         '2. Run: node tools/scanmods.js',
         '3. Reload the game.',
         ''
-      ].join('\n');
+      ]).join('\n');
 
       var canvas = this.atlas.snapshotCanvas();
       canvas.toBlob(function (blob) {

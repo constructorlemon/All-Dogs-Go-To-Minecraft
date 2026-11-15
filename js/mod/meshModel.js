@@ -413,6 +413,7 @@
 
       var joint = {
         id: 'joint_' + (this._nextJoint++),
+        name: opts.name ? String(opts.name).slice(0, 60) : String(child.name || 'Part') + ' joint',
         type: type,
         parent: parent ? parent.id : null,
         child: child.id,
@@ -431,6 +432,11 @@
       var joint = this.getJoint(id);
       if (!joint) return null;
       patch = patch || {};
+      if (patch.name !== undefined) {
+        var childPart = this.getPart(joint.child);
+        var name = String(patch.name).slice(0, 60).trim();
+        joint.name = name || (childPart ? childPart.name + ' joint' : 'Joint');
+      }
       if (patch.pivot) {
         joint.pivot.x = num(patch.pivot.x, joint.pivot.x);
         joint.pivot.y = num(patch.pivot.y, joint.pivot.y);
@@ -509,8 +515,10 @@
       var joints = [];
       for (var j = 0; j < this.joints.length; j++) {
         var q = this.joints[j];
+        var jointChild = this.getPart(q.child);
         joints.push({
           id: q.id,
+          name: q.name || (jointChild ? jointChild.name + ' joint' : 'Joint'),
           type: q.type,
           parent: q.parent || null,
           child: q.child,
@@ -593,8 +601,10 @@
       for (var j = 0; j < joints.length; j++) {
         var q = joints[j] || {};
         if (!q.child || !this.getPart(q.child)) continue;
+        var jointChild = this.getPart(q.child);
         this.joints.push({
           id: q.id || 'joint_' + (this._nextJoint++),
+          name: String(q.name || ((jointChild && jointChild.name ? jointChild.name : 'Part') + ' joint')).slice(0, 60),
           type: q.type === 'floating' ? 'floating' : 'connecting',
           parent: q.parent && this.getPart(q.parent) ? q.parent : null,
           child: q.child,

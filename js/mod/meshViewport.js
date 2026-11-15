@@ -19,13 +19,14 @@
     return v < lo ? lo : v > hi ? hi : v;
   }
 
-  function dominantAxis(normal) {
-    var ax = Math.abs(normal.x);
-    var ay = Math.abs(normal.y);
-    var az = Math.abs(normal.z);
-    if (ax >= ay && ax >= az) return 'x';
-    if (ay >= az) return 'y';
-    return 'z';
+  function partQuaternion(rotation) {
+    var r = rotation || {};
+    return new THREE.Quaternion().setFromEuler(new THREE.Euler(
+      (Number(r.x) || 0) * Math.PI / 180,
+      (Number(r.y) || 0) * Math.PI / 180,
+      (Number(r.z) || 0) * Math.PI / 180,
+      'YXZ'
+    ));
   }
 
   function disposeObject(obj) {
@@ -90,6 +91,12 @@
       this._gizmoLines = {};
       this._gizmoLength = 0.6;
       this._gizmoActiveAxis = null;
+      this._rotateGizmo = null;
+      this._rotateRings = {};
+      this._rotatePickRings = {};
+      this._rotateLength = 0.6;
+      this._rotateActiveAxis = null;
+      this.rotateSpace = 'local';
       this.showJoints = true;
       this._drag = null;
       this._pointer = { ndc: new THREE.Vector2() };
@@ -98,6 +105,7 @@
       this._previewTime = 0;
 
       this._buildGizmo();
+      this._buildRotateGizmo();
 
       var self = this;
       this._onModelChange = function () { self.rebuild(); };
@@ -204,40 +212,107 @@
       this._gizmo = group;
     }
 
-    _updateGizmo() {
-      if (!this._gizmo) return;
-      var part = this.selectedPart ? this.model.getPart(this.selectedPart) : null;
-      var active = this.mode === 'model' && !!part && !!this.rig &&
-        (this.tool === 'move' || this.tool === 'scale');
-      this._gizmo.visible = active;
-      if (!active) return;
+    _buildRotateGizmo() {
+      var self = this;
+      var group = new THREE.Group();
+      group.name = 'mesh-rotate-gizmo';
 
-      var group = this.rig.groups[part.id];
-      if (!group) {
+      ['x', 'y', 'z'].forEach(function (axis) {
+        var color = AXIS_COLORS[axis];
+        var visual = new THREE.Mesh(
+          new THREE.TorusGeometry(1, 0.035, 8, 64),
+          new THREE.MeshBasicMaterial({
+            color: color,
+            transparent: true,
+            opacity: 0.9,
+            depthTest: false,
+            depthWrite: false
+          })
+        );
+        var pick = new THREE.Mesh(
+          new THREE.TorusGeometry(1, 0.11, 8, 48),
+          new THREE.MeshBasicMaterial({
+            transparent: true,
+            opacity: 0,
+            depthTest: false,
+            depthWrite: false
+          })
+        );
+
+        [visual, pick].forEach(function (ring) {
+          if (axis === 'x') ring.rotation.y = Math.PI / 2;
+          else if (axis === 'y') ring.rotation.x = Math.PI / 2;
+          ring.userData.rotateAxis = axis;
+          ring.renderOrder = 1003;
+          group.add(ring);
+        });
+
+        self._rotateRings[axis] = visual;
+        self._rotatePickRings[axis] = pick;
+      });
+
+      group.visible = false;
+      this.scene.add(group);
+      this._rotateGizmo = group;
+    }
+
+    _updateGizmo() {
+      if (!this._gizmo || !this._rotateGizmo) return;
+      var part = this.selectedPart ? this.model.getPart(this.selectedPart) : null;
+      var modelMode = this.mode === 'model' && !!part && !!this.rig;
+      var moveActive = modelMode && (this.tool === 'move' || this.tool === 'scale');
+      var rotateActive = modelMode && this.tool === 'rotate';
+
+      this._gizmo.visible = moveActive;
+      this._rotateGizmo.visible = rotateActive;
+
+      var group = modelMode ? this.rig.groups[part.id] : null;
+      if ((moveActive || rotateActive) && !group) {
         this._gizmo.visible = false;
+        this._rotateGizmo.visible = false;
         return;
       }
 
       var center = new THREE.Vector3();
-      group.getWorldPosition(center);
-      this._gizmo.position.copy(center);
-
-      var length = clamp(this.spherical.radius * 0.16, 0.22, 1.6);
-      this._gizmoLength = length;
-      this._gizmo.scale.setScalar(length);
-
-      var hideZ = this.tool === 'scale' && part.type === 'plane';
-      this._gizmoLines.z.visible = !hideZ;
-      this._gizmoHandles.z.visible = !hideZ;
+      if (group) group.getWorldPosition(center);
 
       var self = this;
-      ['x', 'y', 'z'].forEach(function (axis) {
-        var handle = self._gizmoHandles[axis];
-        if (!handle) return;
-        handle.quaternion.copy(self.camera.quaternion);
-        var s = self._gizmoActiveAxis === axis ? 1.35 : 1;
-        handle.scale.setScalar(s);
-      });
+      if (moveActive) {
+        this._gizmo.position.copy(center);
+        var length = clamp(this.spherical.radius * 0.16, 0.22, 1.6);
+        this._gizmoLength = length;
+        this._gizmo.scale.setScalar(length);
+
+        var hideZ = this.tool === 'scale' && part.type === 'plane';
+        this._gizmoLines.z.visible = !hideZ;
+        this._gizmoHandles.z.visible = !hideZ;
+
+        ['x', 'y', 'z'].forEach(function (axis) {
+          var handle = self._gizmoHandles[axis];
+          if (!handle) return;
+          handle.quaternion.copy(self.camera.quaternion);
+          var s = self._gizmoActiveAxis === axis ? 1.35 : 1;
+          handle.scale.setScalar(s);
+        });
+      }
+
+      if (rotateActive) {
+        this._rotateGizmo.position.copy(center);
+        var rotateLength = clamp(this.spherical.radius * 0.2, 0.3, 2.0);
+        this._rotateLength = rotateLength;
+        this._rotateGizmo.scale.setScalar(rotateLength);
+        if (this.rotateSpace === 'world') {
+          this._rotateGizmo.quaternion.identity();
+        } else {
+          this._rotateGizmo.quaternion.copy(partQuaternion(part.rotation));
+        }
+
+        ['x', 'y', 'z'].forEach(function (axis) {
+          var ring = self._rotateRings[axis];
+          if (!ring) return;
+          ring.scale.setScalar(self._rotateActiveAxis === axis ? 1.06 : 1);
+        });
+      }
     }
 
     _pickGizmoAxis(e) {
@@ -251,6 +326,7 @@
       }
       if (!targets.length) return null;
 
+      this._gizmo.updateMatrixWorld(true);
       this._rayFromEvent(e);
       this._raycaster.params.Line.threshold = this._gizmoLength * 0.1;
       var hits = this._raycaster.intersectObjects(targets, false);
@@ -262,6 +338,27 @@
         return hits[i].object.userData.gizmoAxis || null;
       }
       return null;
+    }
+
+    _pickRotateAxis(e) {
+      if (!this._rotateGizmo || !this._rotateGizmo.visible) return null;
+      var targets = [];
+      for (var axis in this._rotatePickRings) {
+        var ring = this._rotatePickRings[axis];
+        if (ring && ring.visible) targets.push(ring);
+      }
+      if (!targets.length) return null;
+
+      this._rotateGizmo.updateMatrixWorld(true);
+      this._rayFromEvent(e);
+      var hits = this._raycaster.intersectObjects(targets, false);
+      if (!hits.length) return null;
+      return hits[0].object.userData.rotateAxis || null;
+    }
+
+    setRotateSpace(space) {
+      this.rotateSpace = space === 'world' ? 'world' : 'local';
+      this._updateGizmo();
     }
 
     setShowJoints(on) {
@@ -311,6 +408,7 @@
       this.tool = tool || 'select';
       this.renderer.domElement.style.cursor = this.mode === 'paint' ? 'crosshair' : 'default';
       this._gizmoActiveAxis = null;
+      this._rotateActiveAxis = null;
       this._updateGizmo();
     }
 
@@ -524,27 +622,44 @@
       return true;
     }
 
+    _beginRotateTransform(partId, axis, e) {
+      var part = this.model.getPart(partId);
+      var dir = AXES[axis];
+      if (!part || !dir) return false;
+
+      var startQuat = partQuaternion(part.rotation);
+      var worldAxis = this.rotateSpace === 'world'
+        ? dir.clone()
+        : dir.clone().applyQuaternion(startQuat);
+      worldAxis.normalize();
+      var center = new THREE.Vector3(part.position.x, part.position.y, part.position.z);
+      var plane = new THREE.Plane().setFromNormalAndCoplanarPoint(worldAxis, center);
+      var point = new THREE.Vector3();
+      if (!this._rayFromEvent(e).intersectPlane(plane, point)) return false;
+
+      var startVec = point.clone().sub(center);
+      if (startVec.lengthSq() < 1e-8) return false;
+      startVec.normalize();
+
+      this._drag = {
+        kind: 'rotate-ring',
+        partId: partId,
+        axis: axis,
+        worldAxis: worldAxis,
+        center: center,
+        lastVec: startVec,
+        totalAngle: 0,
+        startQuat: startQuat
+      };
+      this._rotateActiveAxis = axis;
+      this._updateGizmo();
+      return true;
+    }
+
     _beginTransform(kind, partId, e, found) {
       var part = this.model.getPart(partId);
       if (!part) return false;
-
-      if (kind === 'rotate') {
-        var lockAxis = null;
-        if (found && found.hit && found.hit.face && found.object) {
-          var normalMatrix = new THREE.Matrix3().getNormalMatrix(found.object.matrixWorld);
-          var worldNormal = found.hit.face.normal.clone().applyMatrix3(normalMatrix).normalize();
-          lockAxis = dominantAxis(worldNormal);
-        }
-        this._drag = {
-          kind: 'rotate',
-          partId: partId,
-          startX: e.clientX,
-          startY: e.clientY,
-          startRot: { x: part.rotation.x, y: part.rotation.y, z: part.rotation.z },
-          lockAxis: lockAxis
-        };
-        return true;
-      }
+      if (kind === 'rotate') return false;
 
       var ray = this._rayFromEvent(e);
       var center = new THREE.Vector3(part.position.x, part.position.y, part.position.z);
@@ -563,7 +678,6 @@
         startX: e.clientX,
         startY: e.clientY,
         startPos: { x: part.position.x, y: part.position.y, z: part.position.z },
-        startRot: { x: part.rotation.x, y: part.rotation.y, z: part.rotation.z },
         startSize: { x: part.size.x, y: part.size.y, z: part.size.z },
         planeNormal: normal.clone(),
         planePoint: point.clone(),
@@ -583,6 +697,34 @@
       var d = this._drag;
       if (!d) return;
       var onTransform = typeof this.onTransform === 'function';
+
+      if (d.kind === 'rotate-ring') {
+        var rotatePlane = new THREE.Plane().setFromNormalAndCoplanarPoint(d.worldAxis, d.center);
+        var rotatePoint = new THREE.Vector3();
+        if (!this._rayFromEvent(e).intersectPlane(rotatePlane, rotatePoint)) return;
+        var vec = rotatePoint.clone().sub(d.center);
+        if (vec.lengthSq() < 1e-8) return;
+        vec.normalize();
+        var cross = new THREE.Vector3().crossVectors(d.lastVec, vec);
+        var step = Math.atan2(cross.dot(d.worldAxis), clamp(d.lastVec.dot(vec), -1, 1));
+        d.totalAngle += step;
+        d.lastVec.copy(vec);
+
+        var quat = new THREE.Quaternion()
+          .setFromAxisAngle(d.worldAxis, d.totalAngle)
+          .multiply(d.startQuat);
+        var euler = new THREE.Euler().setFromQuaternion(quat, 'YXZ');
+        if (onTransform) {
+          this.onTransform(d.partId, {
+            rotation: {
+              x: euler.x * 180 / Math.PI,
+              y: euler.y * 180 / Math.PI,
+              z: euler.z * 180 / Math.PI
+            }
+          });
+        }
+        return;
+      }
 
       if (d.kind === 'axis-move' || d.kind === 'axis-scale') {
         var axisPoint = this._axisDragPoint(d, e);
@@ -635,25 +777,7 @@
 
       var dx = e.clientX - d.startX;
       var dy = e.clientY - d.startY;
-      if (d.kind === 'rotate') {
-        var rotation = {
-          x: d.startRot.x,
-          y: d.startRot.y,
-          z: d.startRot.z
-        };
-        var lock = e.shiftKey ? d.lockAxis : null;
-        if (lock === 'x') {
-          rotation.x += dy * 0.6;
-        } else if (lock === 'y') {
-          rotation.y += dx * 0.6;
-        } else if (lock === 'z') {
-          rotation.z += dx * 0.6;
-        } else {
-          rotation.x += dy * 0.6;
-          rotation.y += dx * 0.6;
-        }
-        if (onTransform) this.onTransform(d.partId, { rotation: rotation });
-      } else if (d.kind === 'scale') {
+      if (d.kind === 'scale') {
         var factor = clamp(1 + (dx - dy) * 0.012, 0.05, 20);
         if (onTransform) {
           this.onTransform(d.partId, {
@@ -704,6 +828,12 @@
         if (self.mode === 'paint') {
           painting = true;
           if (typeof self.onPaintStart === 'function') self.onPaintStart(self.pickCell(e));
+          return;
+        }
+
+        var rotateAxis = self.tool === 'rotate' ? self._pickRotateAxis(e) : null;
+        if (rotateAxis && self.selectedPart &&
+            self._beginRotateTransform(self.selectedPart, rotateAxis, e)) {
           return;
         }
 
@@ -768,6 +898,10 @@
         self._drag = null;
         if (self._gizmoActiveAxis) {
           self._gizmoActiveAxis = null;
+          self._updateGizmo();
+        }
+        if (self._rotateActiveAxis) {
+          self._rotateActiveAxis = null;
           self._updateGizmo();
         }
       }

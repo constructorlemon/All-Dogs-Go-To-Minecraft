@@ -37,7 +37,13 @@
             <button class="mod-tool-btn" data-mesh-tool="rotate">Rotate</button>
             <button class="mod-tool-btn" data-mesh-tool="scale">Scale</button>
           </div>
-          <div class="mod-note">Click a part to select it. With Move or Scale selected, drag a coloured axis handle (red X, green Y, blue Z) to constrain to that axis. Hold Shift while dragging a scale handle for uniform scaling. With Rotate selected, drag the part; hold Shift to lock rotation to the axis of the face you grab. Right-drag orbits; middle-drag pans; the wheel zooms.</div>
+          <label class="mod-label mod-label-mini" for="mesh-rotate-space">Rotate space
+            <select id="mesh-rotate-space" class="mod-select">
+              <option value="local" selected>Local</option>
+              <option value="world">World</option>
+            </select>
+          </label>
+          <div class="mod-note">Click a part to select it. With Move or Scale selected, drag a coloured axis handle (red X, green Y, blue Z) to constrain to that axis. Hold Shift while dragging a scale handle for uniform scaling. With Rotate selected, drag the red, green or blue ring to rotate around X, Y or Z. Local uses the part's own axes; World uses fixed world axes. Right-drag orbits; middle-drag pans; the wheel zooms.</div>
         </div>
 
         <div class="mod-tool-group">
@@ -230,6 +236,9 @@
           <div class="mesh-section-title">Joint properties</div>
           <div id="mesh-joint-empty" class="mod-note">Select a joint to edit it.</div>
           <div id="mesh-joint-fields" hidden>
+            <label class="mod-label">Name
+              <input id="mesh-joint-name" class="mod-text" type="text" spellcheck="false" />
+            </label>
             <div id="mesh-joint-summary" class="mod-note"></div>
             <div class="mesh-three">
               <label class="mod-label">Pivot X

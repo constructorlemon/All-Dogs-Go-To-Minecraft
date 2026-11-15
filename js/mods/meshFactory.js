@@ -100,6 +100,7 @@
       if (type === 'connecting' && !parent) type = 'floating';
       model.joints.push({
         id: String(q.id || ('joint_' + (j + 1))),
+        name: String(q.name || (byId[q.child].name + ' joint')).slice(0, 60),
         type: type,
         parent: type === 'connecting' ? parent : null,
         child: String(q.child),
