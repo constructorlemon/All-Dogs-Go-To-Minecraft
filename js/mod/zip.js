@@ -37,6 +37,28 @@
     return new Uint8Array(out);
   }
 
+  function decodeUtf8(bytes) {
+    if (typeof TextDecoder !== 'undefined') {
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+    var text = '';
+    for (var i = 0; i < bytes.length; i++) text += String.fromCharCode(bytes[i]);
+    try { return decodeURIComponent(escape(text)); } catch (err) { return text; }
+  }
+
+  function inflateRaw(bytes) {
+    if (typeof DecompressionStream === 'undefined' || typeof Response === 'undefined') {
+      return Promise.reject(new Error(
+        'zip: this browser cannot decompress ZIP entries. Re-save the mesh as a stored ZIP.'
+      ));
+    }
+    var stream = new Blob([bytes]).stream()
+      .pipeThrough(new DecompressionStream('deflate-raw'));
+    return new Response(stream).arrayBuffer().then(function (buffer) {
+      return new Uint8Array(buffer);
+    });
+  }
+
   function toBytes(data) {
     if (data instanceof Uint8Array) return data;
     if (data instanceof ArrayBuffer) return new Uint8Array(data);
@@ -161,8 +183,168 @@
     }
   }
 
+  class ZipReader {
+    constructor(data) {
+      this.bytes = toBytes(data);
+      this.view = new DataView(
+        this.bytes.buffer,
+        this.bytes.byteOffset,
+        this.bytes.byteLength
+      );
+      this._entries = null;
+    }
+
+    _parse() {
+      if (this._entries) return this._entries;
+      var bytes = this.bytes;
+      var view = this.view;
+      if (bytes.length < 22) throw new Error('zip: file is too small');
+
+      var eocd = -1;
+      var lowest = Math.max(0, bytes.length - 65557);
+      for (var i = bytes.length - 22; i >= lowest; i--) {
+        if (view.getUint32(i, true) === 0x06054b50) {
+          eocd = i;
+          break;
+        }
+      }
+      if (eocd < 0) throw new Error('zip: no central directory found');
+
+      var count = view.getUint16(eocd + 10, true);
+      var cdSize = view.getUint32(eocd + 12, true);
+      var cdOffset = view.getUint32(eocd + 16, true);
+      if (cdOffset === 0xffffffff || cdSize === 0xffffffff) {
+        throw new Error('zip: ZIP64 archives are not supported');
+      }
+      if (cdOffset + cdSize > bytes.length) {
+        throw new Error('zip: central directory is out of range');
+      }
+
+      var entries = [];
+      var p = cdOffset;
+      for (var n = 0; n < count; n++) {
+        if (p + 46 > bytes.length || view.getUint32(p, true) !== 0x02014b50) {
+          throw new Error('zip: damaged central directory');
+        }
+        var nameLen = view.getUint16(p + 28, true);
+        var extraLen = view.getUint16(p + 30, true);
+        var commentLen = view.getUint16(p + 32, true);
+        var nameStart = p + 46;
+        var nameEnd = nameStart + nameLen;
+        if (nameEnd > bytes.length) throw new Error('zip: damaged entry name');
+
+        entries.push({
+          name: decodeUtf8(bytes.subarray(nameStart, nameEnd)),
+          method: view.getUint16(p + 10, true),
+          flags: view.getUint16(p + 8, true),
+          crc: view.getUint32(p + 16, true),
+          compressedSize: view.getUint32(p + 20, true),
+          size: view.getUint32(p + 24, true),
+          localOffset: view.getUint32(p + 42, true)
+        });
+        p = nameEnd + extraLen + commentLen;
+      }
+
+      this._entries = entries;
+      return entries;
+    }
+
+    entries() {
+      return this._parse().map(function (entry) {
+        return {
+          name: entry.name,
+          size: entry.size,
+          compressedSize: entry.compressedSize,
+          method: entry.method
+        };
+      });
+    }
+
+    names() {
+      var out = [];
+      var entries = this._parse();
+      for (var i = 0; i < entries.length; i++) {
+        var name = entries[i].name;
+        if (name && name.charAt(name.length - 1) !== '/') out.push(name);
+      }
+      return out;
+    }
+
+    find(name) {
+      var target = String(name == null ? '' : name)
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '');
+      if (!target) return null;
+      var entries = this._parse();
+      var lower = target.toLowerCase();
+      var i;
+      for (i = 0; i < entries.length; i++) {
+        if (entries[i].name === target) return entries[i];
+      }
+      for (i = 0; i < entries.length; i++) {
+        if (entries[i].name.toLowerCase() === lower) return entries[i];
+      }
+      return null;
+    }
+
+    has(name) {
+      return !!this.find(name);
+    }
+
+    read(name) {
+      var entry = name && typeof name === 'object' ? name : this.find(name);
+      if (!entry) {
+        return Promise.reject(new Error('zip: missing entry ' + name));
+      }
+      if (entry.name.charAt(entry.name.length - 1) === '/') {
+        return Promise.resolve(new Uint8Array(0));
+      }
+
+      var bytes = this.bytes;
+      var view = this.view;
+      var p = entry.localOffset;
+      if (p + 30 > bytes.length || view.getUint32(p, true) !== 0x04034b50) {
+        return Promise.reject(new Error('zip: damaged local header for ' + entry.name));
+      }
+      var nameLen = view.getUint16(p + 26, true);
+      var extraLen = view.getUint16(p + 28, true);
+      var start = p + 30 + nameLen + extraLen;
+      var end = start + entry.compressedSize;
+      if (start > bytes.length || end > bytes.length) {
+        return Promise.reject(new Error('zip: entry data is out of range for ' + entry.name));
+      }
+
+      var raw = bytes.subarray(start, end);
+      var pending;
+      if (entry.method === 0) pending = Promise.resolve(raw);
+      else if (entry.method === 8) pending = inflateRaw(raw);
+      else {
+        return Promise.reject(new Error(
+          'zip: unsupported compression method ' + entry.method + ' for ' + entry.name
+        ));
+      }
+
+      return pending.then(function (data) {
+        if (data.length !== entry.size) {
+          throw new Error('zip: size mismatch for ' + entry.name);
+        }
+        if (crc32(data) !== entry.crc) {
+          throw new Error('zip: checksum mismatch for ' + entry.name);
+        }
+        return data;
+      });
+    }
+
+    text(name) {
+      return this.read(name).then(function (data) {
+        return decodeUtf8(data);
+      });
+    }
+  }
+
   window.MeshZip = {
     ZipWriter: ZipWriter,
+    ZipReader: ZipReader,
     crc32: crc32,
     utf8: utf8
   };

@@ -55,6 +55,38 @@
     if (!el.value && el.options.length) el.selectedIndex = 0;
   }
 
+  // ZIP entries can sit at the archive root or inside an exported folder.
+  function zipEntryName(names, fileName) {
+    var target = String(fileName || '').toLowerCase();
+    var best = null;
+    for (var i = 0; i < names.length; i++) {
+      var name = names[i];
+      var lower = name.toLowerCase();
+      var slash = lower.lastIndexOf('/');
+      var base = slash >= 0 ? lower.slice(slash + 1) : lower;
+      if (base !== target) continue;
+      if (lower === target) return name;
+      if (!best || name.length < best.length) best = name;
+    }
+    return best;
+  }
+
+  function decodeImage(blob) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(blob);
+      var image = new Image();
+      image.onload = function () {
+        URL.revokeObjectURL(url);
+        resolve(image);
+      };
+      image.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error('Could not decode texture.png.'));
+      };
+      image.src = url;
+    });
+  }
+
   class MeshEditor {
     constructor() {
       var self = this;
@@ -253,8 +285,20 @@
         });
       });
 
-      $('mesh-rotate-space').addEventListener('change', function () {
-        self.viewport.setRotateSpace(this.value);
+      $('mesh-transform-space').addEventListener('change', function () {
+        self.viewport.setTransformSpace(this.value);
+      });
+
+      $('mesh-snap').addEventListener('change', function () {
+        self.viewport.setSnapping(this.checked);
+      });
+
+      $('mesh-snap-move').addEventListener('input', function () {
+        self.viewport.setSnapStep(readNum(this, 0.1));
+      });
+
+      $('mesh-snap-rotate').addEventListener('input', function () {
+        self.viewport.setSnapAngle(readNum(this, 10));
       });
 
       $('mesh-duplicate').addEventListener('click', function () { self.duplicateSelected(); });
@@ -343,6 +387,15 @@
       });
 
       $('mesh-export').addEventListener('click', function () { self.exportZip(); });
+      $('mesh-import').addEventListener('click', function () {
+        var input = $('mesh-import-file');
+        if (input) input.click();
+      });
+      $('mesh-import-file').addEventListener('change', function () {
+        var file = this.files && this.files[0];
+        if (file) self.importZip(file);
+        this.value = '';
+      });
 
       this._bindPaintTools();
 
@@ -612,6 +665,55 @@
       this.atlas.redoStack.length = 0;
       this.refresh();
       this.flash('Mesh cleared.');
+    }
+
+    async importZip(file) {
+      if (!file) return false;
+      try {
+        var bytes = new Uint8Array(await file.arrayBuffer());
+        var reader = new window.MeshZip.ZipReader(bytes);
+        var names = reader.names();
+        var modelName = zipEntryName(names, 'model.json');
+        if (!modelName) throw new Error('No model.json found in that ZIP.');
+
+        var data;
+        try {
+          data = JSON.parse(await reader.text(modelName));
+        } catch (err) {
+          throw new Error('model.json is not valid JSON.');
+        }
+
+        // Validate into a throwaway model first so a bad archive never wipes
+        // the mesh the user is working on.
+        var probe = new window.MeshModel();
+        if (!probe.fromJSON(data) || !probe.parts.length) {
+          throw new Error('model.json does not contain any parts.');
+        }
+
+        var textureName = zipEntryName(names, 'texture.png');
+        if (textureName) {
+          var png = await reader.read(textureName);
+          var image = await decodeImage(new Blob([png], { type: 'image/png' }));
+          this.atlas.loadFromImage(image);
+        } else {
+          this.atlas.resetPixels();
+        }
+
+        this.selectedPart = null;
+        this.selectedJoint = null;
+        this._partOptionsSig = '';
+        this.viewport.selectedPart = null;
+        this.model.fromJSON(data);
+        this.setMode('model');
+        this.refresh();
+        this.viewport.frameAll();
+        this.flash('Imported ' + this.model.parts.length + ' part' +
+          (this.model.parts.length === 1 ? '' : 's') + ' from ' + file.name + '.');
+        return true;
+      } catch (err) {
+        this.flash(err && err.message ? err.message : 'Could not import that ZIP.', true);
+        return false;
+      }
     }
 
     refresh() {
@@ -904,6 +1006,8 @@
         '1. Unzip the "' + folder + '" folder into mods/mobs/.',
         '2. Run: node tools/scanmods.js',
         '3. Reload the game.',
+        '',
+        'To keep editing this mesh, use Import ZIP in the mesh editor and choose this file.',
         ''
       ]).join('\n');
 

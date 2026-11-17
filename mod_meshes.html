@@ -37,13 +37,22 @@
             <button class="mod-tool-btn" data-mesh-tool="rotate">Rotate</button>
             <button class="mod-tool-btn" data-mesh-tool="scale">Scale</button>
           </div>
-          <label class="mod-label mod-label-mini" for="mesh-rotate-space">Rotate space
-            <select id="mesh-rotate-space" class="mod-select">
+          <label class="mod-label mod-label-mini" for="mesh-transform-space">Transform space
+            <select id="mesh-transform-space" class="mod-select">
               <option value="local" selected>Local</option>
               <option value="world">World</option>
             </select>
           </label>
-          <div class="mod-note">Click a part to select it. With Move or Scale selected, drag a coloured axis handle (red X, green Y, blue Z) to constrain to that axis. Hold Shift while dragging a scale handle for uniform scaling. With Rotate selected, drag the red, green or blue ring to rotate around X, Y or Z. Local uses the part's own axes; World uses fixed world axes. Right-drag orbits; middle-drag pans; the wheel zooms.</div>
+          <label class="mod-toggle"><input id="mesh-snap" type="checkbox" checked /> Snap</label>
+          <div class="mesh-two">
+            <label class="mod-label" for="mesh-snap-move">Units
+              <input id="mesh-snap-move" class="mod-text" type="number" value="0.1" min="0.001" step="0.01" />
+            </label>
+            <label class="mod-label" for="mesh-snap-rotate">Degrees
+              <input id="mesh-snap-rotate" class="mod-text" type="number" value="10" min="0.1" step="1" />
+            </label>
+          </div>
+          <div class="mod-note">Click a part to select it. With Move or Scale selected, drag a coloured axis handle (red X, green Y, blue Z) to constrain to that axis. Hold Shift while dragging a scale handle for uniform scaling. With Rotate selected, drag the red, green or blue ring to rotate around X, Y or Z. Local uses the part's own axes; World uses fixed world axes. Snap rounds movement to the unit step and rotation to the angle step. Right-drag orbits; middle-drag pans; the wheel zooms.</div>
         </div>
 
         <div class="mod-tool-group">
@@ -281,6 +290,10 @@
 
       <section id="mesh-export-panel">
         <div class="mesh-section">
+          <div class="mesh-section-title">Import</div>
+          <button id="mesh-import" class="mod-act-btn">Import ZIP</button>
+          <input id="mesh-import-file" type="file" accept=".zip,application/zip" hidden />
+          <div class="mod-note">Open a ZIP exported here to keep editing it. The archive needs a <code>model.json</code> and can include a <code>texture.png</code>.</div>
           <div class="mesh-section-title">Export</div>
           <label class="mod-label">Name
             <input id="mesh-name" class="mod-text" type="text" spellcheck="false" autocomplete="off" />

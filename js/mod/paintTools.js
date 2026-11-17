@@ -429,6 +429,29 @@
       return id;
     }
 
+    loadFromImage(image) {
+      if (!image) return;
+      var canvas = document.createElement('canvas');
+      canvas.width = this.size;
+      canvas.height = this.size;
+      var ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, this.size, this.size);
+      ctx.drawImage(image, 0, 0, this.size, this.size);
+      var data = ctx.getImageData(0, 0, this.size, this.size).data;
+      this.pixels.set(data);
+      this.undoStack.length = 0;
+      this.redoStack.length = 0;
+      this.invalidate();
+    }
+
+    resetPixels() {
+      this.pixels.fill(0);
+      this.undoStack.length = 0;
+      this.redoStack.length = 0;
+      this.invalidate();
+    }
+
     snapshotCanvas() {
       if (this._dirty) {
         this.ctx.putImageData(this.makeImageData(), 0, 0);

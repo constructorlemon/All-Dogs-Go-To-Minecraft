@@ -19,6 +19,17 @@
     return v < lo ? lo : v > hi ? hi : v;
   }
 
+  function tidy(v) {
+    return Math.round((Number(v) || 0) * 1e9) / 1e9;
+  }
+
+  function snapTo(value, step) {
+    var n = Number(value) || 0;
+    var s = Number(step) || 0;
+    if (!isFinite(n) || !isFinite(s) || s <= 0) return n;
+    return tidy(Math.round(n / s) * s);
+  }
+
   function partQuaternion(rotation) {
     var r = rotation || {};
     return new THREE.Quaternion().setFromEuler(new THREE.Euler(
@@ -96,7 +107,10 @@
       this._rotatePickRings = {};
       this._rotateLength = 0.6;
       this._rotateActiveAxis = null;
-      this.rotateSpace = 'local';
+      this.transformSpace = 'local';
+      this.snapEnabled = true;
+      this.snapTranslate = 0.1;
+      this.snapRotate = 10;
       this.showJoints = true;
       this._drag = null;
       this._pointer = { ndc: new THREE.Vector2() };
@@ -282,15 +296,21 @@
         var length = clamp(this.spherical.radius * 0.16, 0.22, 1.6);
         this._gizmoLength = length;
         this._gizmo.scale.setScalar(length);
+        if (this.transformSpace === 'world') {
+          this._gizmo.quaternion.identity();
+        } else {
+          this._gizmo.quaternion.copy(partQuaternion(part.rotation));
+        }
 
         var hideZ = this.tool === 'scale' && part.type === 'plane';
         this._gizmoLines.z.visible = !hideZ;
         this._gizmoHandles.z.visible = !hideZ;
 
+        var parentQuat = this._gizmo.quaternion;
         ['x', 'y', 'z'].forEach(function (axis) {
           var handle = self._gizmoHandles[axis];
           if (!handle) return;
-          handle.quaternion.copy(self.camera.quaternion);
+          handle.quaternion.copy(parentQuat).invert().multiply(self.camera.quaternion);
           var s = self._gizmoActiveAxis === axis ? 1.35 : 1;
           handle.scale.setScalar(s);
         });
@@ -301,7 +321,7 @@
         var rotateLength = clamp(this.spherical.radius * 0.2, 0.3, 2.0);
         this._rotateLength = rotateLength;
         this._rotateGizmo.scale.setScalar(rotateLength);
-        if (this.rotateSpace === 'world') {
+        if (this.transformSpace === 'world') {
           this._rotateGizmo.quaternion.identity();
         } else {
           this._rotateGizmo.quaternion.copy(partQuaternion(part.rotation));
@@ -356,9 +376,35 @@
       return hits[0].object.userData.rotateAxis || null;
     }
 
-    setRotateSpace(space) {
-      this.rotateSpace = space === 'world' ? 'world' : 'local';
+    setTransformSpace(space) {
+      this.transformSpace = space === 'world' ? 'world' : 'local';
       this._updateGizmo();
+    }
+
+    setRotateSpace(space) {
+      this.setTransformSpace(space);
+    }
+
+    get rotateSpace() {
+      return this.transformSpace;
+    }
+
+    set rotateSpace(space) {
+      this.transformSpace = space === 'world' ? 'world' : 'local';
+    }
+
+    setSnapping(on) {
+      this.snapEnabled = !!on;
+    }
+
+    setSnapStep(step) {
+      var n = Number(step);
+      if (isFinite(n) && n > 0) this.snapTranslate = n;
+    }
+
+    setSnapAngle(degrees) {
+      var n = Number(degrees);
+      if (isFinite(n) && n > 0) this.snapRotate = n;
     }
 
     setShowJoints(on) {
@@ -589,30 +635,25 @@
 
     _beginAxisTransform(kind, partId, axis, e) {
       var part = this.model.getPart(partId);
-      var dir = AXES[axis];
-      if (!part || !dir) return false;
+      if (!part || !AXES[axis]) return false;
+      var dir = AXES[axis].clone();
+      if (this.transformSpace === 'local') {
+        dir.applyQuaternion(partQuaternion(part.rotation));
+      }
+      dir.normalize();
 
       var center = new THREE.Vector3(part.position.x, part.position.y, part.position.z);
-      var viewDir = new THREE.Vector3();
-      this.camera.getWorldDirection(viewDir);
-      var camRight = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
-      var normal = new THREE.Vector3().crossVectors(viewDir, dir);
-      if (normal.lengthSq() < 1e-6) normal.crossVectors(camRight, dir);
-      if (normal.lengthSq() < 1e-6) normal.set(0, 1, 0);
-      normal.normalize();
-
-      var plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, center);
-      var point = new THREE.Vector3();
-      if (!this._rayFromEvent(e).intersectPlane(plane, point)) return false;
+      var point = this._axisPoint(center, dir, e);
+      if (!point) return false;
 
       this._drag = {
         kind: kind === 'scale' ? 'axis-scale' : 'axis-move',
         axis: axis,
         axisDir: dir.clone(),
+        space: this.transformSpace,
         partId: partId,
         startPos: { x: part.position.x, y: part.position.y, z: part.position.z },
         startSize: { x: part.size.x, y: part.size.y, z: part.size.z },
-        planeNormal: normal.clone(),
         planePoint: center.clone(),
         startPoint: point.clone(),
         gizmoLength: Math.max(0.01, this._gizmoLength)
@@ -628,7 +669,7 @@
       if (!part || !dir) return false;
 
       var startQuat = partQuaternion(part.rotation);
-      var worldAxis = this.rotateSpace === 'world'
+      var worldAxis = this.transformSpace === 'world'
         ? dir.clone()
         : dir.clone().applyQuaternion(startQuat);
       worldAxis.normalize();
@@ -686,11 +727,21 @@
       return true;
     }
 
+    _axisPoint(center, axisDir, e) {
+      // Closest point on the infinite axis line to the pointer ray. This stays
+      // stable even when the camera lies in the plane spanned by the axis and
+      // the view direction (where a ray-plane hit would be degenerate).
+      var ray = this._rayFromEvent(e);
+      var w = ray.origin.clone().sub(center);
+      var b = ray.direction.dot(axisDir);
+      var denom = 1 - b * b;
+      if (denom < 1e-6) return null;
+      var t = (axisDir.dot(w) - ray.direction.dot(w) * b) / denom;
+      return center.clone().addScaledVector(axisDir, t);
+    }
+
     _axisDragPoint(d, e) {
-      var plane = new THREE.Plane().setFromNormalAndCoplanarPoint(d.planeNormal, d.planePoint);
-      var point = new THREE.Vector3();
-      if (!this._rayFromEvent(e).intersectPlane(plane, point)) return null;
-      return point;
+      return this._axisPoint(d.planePoint, d.axisDir, e);
     }
 
     _moveTransform(e) {
@@ -710,16 +761,22 @@
         d.totalAngle += step;
         d.lastVec.copy(vec);
 
+        var angle = d.totalAngle;
+        if (this.snapEnabled && this.snapRotate > 0) {
+          angle = snapTo(angle * 180 / Math.PI, this.snapRotate) * Math.PI / 180;
+        }
+        d.appliedAngle = angle;
+
         var quat = new THREE.Quaternion()
-          .setFromAxisAngle(d.worldAxis, d.totalAngle)
+          .setFromAxisAngle(d.worldAxis, angle)
           .multiply(d.startQuat);
         var euler = new THREE.Euler().setFromQuaternion(quat, 'YXZ');
         if (onTransform) {
           this.onTransform(d.partId, {
             rotation: {
-              x: euler.x * 180 / Math.PI,
-              y: euler.y * 180 / Math.PI,
-              z: euler.z * 180 / Math.PI
+              x: tidy(euler.x * 180 / Math.PI),
+              y: tidy(euler.y * 180 / Math.PI),
+              z: tidy(euler.z * 180 / Math.PI)
             }
           });
         }
@@ -732,12 +789,13 @@
         var amount = axisPoint.clone().sub(d.startPoint).dot(d.axisDir);
 
         if (d.kind === 'axis-move') {
+          if (this.snapEnabled) amount = snapTo(amount, this.snapTranslate);
           if (onTransform) {
             this.onTransform(d.partId, {
               position: {
-                x: d.startPos.x + d.axisDir.x * amount,
-                y: d.startPos.y + d.axisDir.y * amount,
-                z: d.startPos.z + d.axisDir.z * amount
+                x: tidy(d.startPos.x + d.axisDir.x * amount),
+                y: tidy(d.startPos.y + d.axisDir.y * amount),
+                z: tidy(d.startPos.z + d.axisDir.z * amount)
               }
             });
           }
@@ -766,10 +824,18 @@
         var plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, d.planePoint);
         var point = new THREE.Vector3();
         if (!ray.intersectPlane(plane, point)) return;
+        var dx = point.x - d.startPoint.x;
+        var dy = point.y - d.startPoint.y;
+        var dz = point.z - d.startPoint.z;
+        if (this.snapEnabled) {
+          dx = snapTo(dx, this.snapTranslate);
+          dy = snapTo(dy, this.snapTranslate);
+          dz = snapTo(dz, this.snapTranslate);
+        }
         var pos = {
-          x: d.startPos.x + point.x - d.startPoint.x,
-          y: d.startPos.y + point.y - d.startPoint.y,
-          z: d.startPos.z + point.z - d.startPoint.z
+          x: tidy(d.startPos.x + dx),
+          y: tidy(d.startPos.y + dy),
+          z: tidy(d.startPos.z + dz)
         };
         if (onTransform) this.onTransform(d.partId, { position: pos });
         return;
