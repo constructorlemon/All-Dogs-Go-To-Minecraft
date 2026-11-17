@@ -479,6 +479,7 @@
           Math.abs((zEnt.bounds.max.y - zEnt.bounds.min.y) - 1.8) < 1e-6 &&
           zEnt.mesh);
         results.push('zombieCreate=' + (zOk ? 1 : 0));
+        results.push('zombieMesh=' + (zEnt && zEnt.rig ? 1 : 0));
         results.push('goap=' + (AllDogs.goap ? 1 : 0));
         results.push('zombieGoap=' + (zSchema && zSchema.goap ? 1 : 0));
         results.push('zombieBrain=' + (zBrain ? 1 : 0));
@@ -586,8 +587,11 @@
         var zHit = zEnt.hit(5, g.player, { knockback: { x: 1, z: 0, speed: 5 } });
         results.push('zombieHitDamage=' + (zHit && zEnt.health === zPrevHealth - 5 ? 1 : 0));
         results.push('zombieHitKnockback=' + (zEnt.vel.x > 0.5 ? 1 : 0));
+        var zFlashMesh = zEnt.rig && zEnt.rig.meshes && zEnt.rig.meshes[0]
+          ? zEnt.rig.meshes[0]
+          : zEnt.mesh;
         results.push('zombieHurtFlash=' + (zEnt.hurtTime > 0 &&
-          zEnt.mesh.material.emissive && zEnt.mesh.material.emissive.r > 0.1 ? 1 : 0));
+          zFlashMesh.material.emissive && zFlashMesh.material.emissive.r > 0.1 ? 1 : 0));
         zEnt.health = zEnt.maxHealth;
         zEnt.hurtTime = 0;
         zEnt.updateHurtFlash();

@@ -407,13 +407,6 @@
         this.meshYOffset = 0;
         this._rigTime = 0;
       }
-
-      update(dt, ctx) {
-        super.update(dt, ctx);
-        if (!this.rig) return;
-        this._rigTime += dt || 0;
-        this.rig.update(this._rigTime);
-      }
     };
   }
 
@@ -485,9 +478,25 @@
     return out;
   }
 
+  // A mob schema named "zombie" can have its appearance supplied by any mesh
+  // bundle tagged with AI "zombie". Re-exporting the bundle is enough to change
+  // the look; no schema edit or per-type registration is required. The first
+  // matching bundle wins, and each mob gets its own rig so joints animate
+  // independently.
+  function buildAppearance(ai) {
+    if (!ai) return null;
+    for (var i = 0; i < order.length; i++) {
+      var entry = registry[order[i]];
+      if (!entry || entry.kind !== 'mob' || entry.ai !== ai) continue;
+      return buildRig(entry.model, entry.texture);
+    }
+    return null;
+  }
+
   AllDogs.meshFactory = {
     buildRig: buildRig,
     buildGeometry: buildGeometry,
+    buildAppearance: buildAppearance,
     normalizeModel: normalizeModel,
     register: register,
     get: function (type) { return registry[type] || null; },

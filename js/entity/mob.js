@@ -128,17 +128,26 @@
       }
 
       var mesh = null;
-      if (schema && typeof schema.buildMesh === 'function') {
+      var appearance = null;
+      if (AllDogs.meshFactory && typeof AllDogs.meshFactory.buildAppearance === 'function') {
+        try { appearance = AllDogs.meshFactory.buildAppearance(type); } catch (err) { appearance = null; }
+      }
+      if (appearance) {
+        // Mesh bundle origins sit at the feet, so the rig must not be lifted by
+        // half the body height the way the centred box fallback is.
+        this.rig = appearance;
+        mesh = appearance.root;
+        this.meshYOffset = pick(opts.meshYOffset, cfg.meshYOffset, 0);
+      } else if (schema && typeof schema.buildMesh === 'function') {
         try { mesh = schema.buildMesh(this); } catch (err) { mesh = null; }
       }
       this.mesh = mesh || fallbackMesh(this);
       if (this.mesh.rotation) this.mesh.rotation.order = 'YXZ';
 
-      // Hurt flashing needs a per-mob material; schemas usually share a cached
-      // material between every instance, so the clone is created lazily the
+      // Hurt flashing needs per-mob materials; schemas usually share a cached
+      // material between every instance, so the clones are created lazily the
       // first time this mob is hurt.
-      this._flashMaterial = null;
-      this._flashBaseEmissive = null;
+      this._flashMaterials = null;
       this._flashActive = false;
     }
 
@@ -168,33 +177,53 @@
       if (this.mesh.rotation) this.mesh.rotation.y = this.yaw;
     }
 
-    ensureFlashMaterial() {
-      if (this._flashMaterial) return this._flashMaterial;
-      if (!this.mesh || !this.mesh.material || Array.isArray(this.mesh.material)) return null;
-      var mat = this.mesh.material;
-      if (mat.clone) {
-        mat = mat.clone();
-        this.mesh.material = mat;
+    ensureFlashMaterials() {
+      if (this._flashMaterials) return this._flashMaterials;
+      if (!this.mesh) return null;
+      var meshes = this.rig && this.rig.meshes ? this.rig.meshes : [this.mesh];
+      var sources = [];
+      var out = [];
+      for (var i = 0; i < meshes.length; i++) {
+        var target = meshes[i];
+        if (!target || !target.material || Array.isArray(target.material)) continue;
+        var source = target.material;
+        var index = sources.indexOf(source);
+        if (index < 0) {
+          var mat = source.clone ? source.clone() : source;
+          sources.push(source);
+          out.push({
+            material: mat,
+            emissive: mat.emissive ? mat.emissive.clone() : null
+          });
+          index = out.length - 1;
+        }
+        target.material = out[index].material;
       }
-      this._flashMaterial = mat;
-      this._flashBaseEmissive = mat.emissive ? mat.emissive.clone() : null;
-      return mat;
+      if (!out.length) return null;
+      this._flashMaterials = out;
+      return out;
     }
 
-    // Briefly tint the material red when hurt. Hurt time drives the intensity
+    // Briefly tint every rig part red when hurt. Hurt time drives the intensity
     // so repeated hits keep the flash alive instead of restarting a timer.
     updateHurtFlash() {
       if (this.hurtTime <= 0 && !this._flashActive) return;
-      var mat = this.ensureFlashMaterial();
-      if (!mat || !mat.emissive) return;
+      var materials = this.ensureFlashMaterials();
+      if (!materials) return;
       if (this.hurtTime > 0) {
         var strength = Math.min(1, this.hurtTime / 0.3);
         var red = 0.18 + strength * 0.42;
-        mat.emissive.setRGB(red, red * 0.05, red * 0.05);
+        for (var i = 0; i < materials.length; i++) {
+          var mat = materials[i].material;
+          if (mat.emissive) mat.emissive.setRGB(red, red * 0.05, red * 0.05);
+        }
         this._flashActive = true;
       } else if (this._flashActive) {
-        if (this._flashBaseEmissive) mat.emissive.copy(this._flashBaseEmissive);
-        else mat.emissive.setRGB(0, 0, 0);
+        for (var j = 0; j < materials.length; j++) {
+          var item = materials[j];
+          if (item.emissive) item.material.emissive.copy(item.emissive);
+          else if (item.material.emissive) item.material.emissive.setRGB(0, 0, 0);
+        }
         this._flashActive = false;
       }
     }
@@ -515,6 +544,14 @@
 
     update(dt, game) {
       if (!this.alive) return;
+
+      // Rigs animate their joints on their own clock, independent of AI or
+      // navigation. Generated mesh mobs get this for free too.
+      if (this.rig) {
+        this._rigTime = (this._rigTime || 0) + (dt || 0);
+        this.rig.update(this._rigTime);
+      }
+
       var world = game && game.world;
       if (!world) return;
 
