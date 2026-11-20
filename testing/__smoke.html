@@ -480,6 +480,9 @@
           zEnt.mesh);
         results.push('zombieCreate=' + (zOk ? 1 : 0));
         results.push('zombieMesh=' + (zEnt && zEnt.rig ? 1 : 0));
+        var meshList = AllDogs.meshFactory ? AllDogs.meshFactory.list() : [];
+        results.push('meshTextureOrientation=' + (meshList.length && meshList[0].texture &&
+          meshList[0].texture.flipY === false ? 1 : 0));
         results.push('goap=' + (AllDogs.goap ? 1 : 0));
         results.push('zombieGoap=' + (zSchema && zSchema.goap ? 1 : 0));
         results.push('zombieBrain=' + (zBrain ? 1 : 0));

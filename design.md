@@ -276,7 +276,7 @@ All scene faces share one 1024×1024 atlas of fixed 32×32 tiles (32×32 slots, 
 
 `tools/scanmods.js` scans PNG files, decodes supported 8-bit PNG color types, slices the six atlas faces, and writes `js/mods/manifest.js`. It also lists JSON files in `mods/mobs` and scans mesh bundles: each directory under `mods/mobs` containing `model.json` and `texture.png` is embedded as model JSON plus a base64 PNG, so the game never needs `fetch()` on `file://`.
 
-`js/mods/modLoader.js` processes the manifest sequentially before game boot. It loads embedded face data or image paths, registers dynamic block IDs/items/textures/icons, and optionally loads `mods/schema/<name>.js`. A schema is exposed through a temporary `module.exports` bridge. A block schema can provide:
+`js/mods/modLoader.js` processes the manifest sequentially before game boot. It loads embedded face data or image paths, registers dynamic block IDs/items/textures/icons, and optionally loads `mods/schema/<name>.js`. Mesh PNGs are loaded with `flipY = false` so their UVs match the editor's `DataTexture` atlas; the default image-texture orientation would sample only transparent cells and make rigs invisible. A schema is exposed through a temporary `module.exports` bridge. A block schema can provide:
 
 - `onClick` for block interaction;
 - `onCollide` for player collision effects;

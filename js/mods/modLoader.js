@@ -114,6 +114,10 @@
     return loadImage('data:image/png;base64,' + b64).then(function (img) {
       var THREE = window.THREE;
       var texture = new THREE.Texture(img);
+      // Mesh UVs are generated for the editor's DataTexture, whose first row is
+      // v=0. Image textures default to flipY=true, which samples the empty part
+      // of the atlas instead and makes the rig invisible.
+      texture.flipY = false;
       texture.magFilter = THREE.NearestFilter;
       texture.minFilter = THREE.NearestFilter;
       texture.generateMipmaps = false;
